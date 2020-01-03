@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -33,6 +33,9 @@
 #include "Util/logger.h"
 #include "Network/Buffer.h"
 #include "Network/sockutil.h"
+#include "amf.h"
+#include "Extension/Track.h"
+
 using namespace toolkit;
 
 #define PORT	1935
@@ -150,9 +153,9 @@ public:
     };
 public:
     RtmpPacket() = default;
-    RtmpPacket(const RtmpPacket &that) = default;
-    RtmpPacket &operator=(const RtmpPacket &that) = default;
-    RtmpPacket &operator=(RtmpPacket &&that) = default;
+    RtmpPacket(const RtmpPacket &that) = delete;
+    RtmpPacket &operator=(const RtmpPacket &that) = delete;
+    RtmpPacket &operator=(RtmpPacket &&that) = delete;
 
     RtmpPacket(RtmpPacket &&that){
         typeId = that.typeId;
@@ -291,6 +294,114 @@ public:
         return ret;
     }
 };
+
+
+
+/**
+ * rtmp metadata基类，用于描述rtmp格式信息
+ */
+class Metadata : public CodecInfo{
+public:
+    typedef std::shared_ptr<Metadata> Ptr;
+
+    Metadata():_metadata(AMF_OBJECT){}
+    virtual ~Metadata(){}
+    const AMFValue &getMetadata() const{
+        return _metadata;
+    }
+protected:
+    AMFValue _metadata;
+};
+
+/**
+* metadata中除音视频外的其他描述部分
+*/
+class TitleMeta : public Metadata{
+public:
+    typedef std::shared_ptr<TitleMeta> Ptr;
+
+    TitleMeta(float dur_sec = 0,
+              uint64_t fileSize = 0,
+              const map<string,string> &header = map<string,string>()){
+        _metadata.set("duration", dur_sec);
+        _metadata.set("fileSize", 0);
+        _metadata.set("server","ZLMediaKit");
+        for (auto &pr : header){
+            _metadata.set(pr.first, pr.second);
+        }
+    }
+
+    /**
+     * 返回音频或视频类型
+     * @return
+     */
+    TrackType getTrackType() const override {
+        return TrackTitle;
+    }
+
+    /**
+     * 返回编码器id
+     * @return
+     */
+    CodecId getCodecId() const override{
+        return CodecInvalid;
+    }
+};
+
+class VideoMeta : public Metadata{
+public:
+    typedef std::shared_ptr<VideoMeta> Ptr;
+
+    VideoMeta(const VideoTrack::Ptr &video,int datarate = 5000);
+    virtual ~VideoMeta(){}
+
+    /**
+     * 返回音频或视频类型
+     * @return
+     */
+    TrackType getTrackType() const override {
+        return TrackVideo;
+    }
+
+    /**
+     * 返回编码器id
+     * @return
+     */
+    CodecId getCodecId() const override{
+        return _codecId;
+    }
+private:
+    CodecId _codecId;
+};
+
+
+class AudioMeta : public Metadata{
+public:
+    typedef std::shared_ptr<AudioMeta> Ptr;
+
+    AudioMeta(const AudioTrack::Ptr &audio,int datarate = 160);
+
+    virtual ~AudioMeta(){}
+
+    /**
+     * 返回音频或视频类型
+     * @return
+     */
+    TrackType getTrackType() const override {
+        return TrackAudio;
+    }
+
+    /**
+     * 返回编码器id
+     * @return
+     */
+    CodecId getCodecId() const override{
+        return _codecId;
+    }
+private:
+    CodecId _codecId;
+};
+
 
 }//namespace mediakit
 

@@ -1,7 +1,7 @@
-/*
+﻿/*
 * MIT License
 *
-* Copyright (c) 2016 xiongziliang <771730766@qq.com>
+* Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
 *
 * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
 *
@@ -26,7 +26,6 @@
 
 #include <algorithm>
 #include "PusherBase.h"
-#include "Rtsp/Rtsp.h"
 #include "Rtsp/RtspPusher.h"
 #include "Rtmp/RtmpPusher.h"
 
@@ -35,7 +34,8 @@ using namespace mediakit::Client;
 
 namespace mediakit {
 
-PusherBase::Ptr PusherBase::createPusher(const MediaSource::Ptr &src,
+PusherBase::Ptr PusherBase::createPusher(const EventPoller::Ptr &poller,
+                                         const MediaSource::Ptr &src,
                                          const string & strUrl) {
     static auto releasePusher = [](PusherBase *ptr){
         onceToken token(nullptr,[&](){
@@ -44,13 +44,24 @@ PusherBase::Ptr PusherBase::createPusher(const MediaSource::Ptr &src,
         ptr->teardown();
     };
     string prefix = FindField(strUrl.data(), NULL, "://");
+
+    if (strcasecmp("rtsps",prefix.data()) == 0) {
+        return PusherBase::Ptr(new TcpClientWithSSL<RtspPusher>(poller,dynamic_pointer_cast<RtspMediaSource>(src)),releasePusher);
+    }
+
     if (strcasecmp("rtsp",prefix.data()) == 0) {
-        return PusherBase::Ptr(new RtspPusher(dynamic_pointer_cast<RtspMediaSource>(src)),releasePusher);
+        return PusherBase::Ptr(new RtspPusher(poller,dynamic_pointer_cast<RtspMediaSource>(src)),releasePusher);
     }
+
+    if (strcasecmp("rtmps",prefix.data()) == 0) {
+        return PusherBase::Ptr(new TcpClientWithSSL<RtmpPusher>(poller,dynamic_pointer_cast<RtmpMediaSource>(src)),releasePusher);
+    }
+
     if (strcasecmp("rtmp",prefix.data()) == 0) {
-        return PusherBase::Ptr(new RtmpPusher(dynamic_pointer_cast<RtmpMediaSource>(src)),releasePusher);
+        return PusherBase::Ptr(new RtmpPusher(poller,dynamic_pointer_cast<RtmpMediaSource>(src)),releasePusher);
     }
-    return PusherBase::Ptr(new RtspPusher(dynamic_pointer_cast<RtspMediaSource>(src)),releasePusher);
+
+    return PusherBase::Ptr(new RtspPusher(poller,dynamic_pointer_cast<RtspMediaSource>(src)),releasePusher);
 }
 
 PusherBase::PusherBase() {

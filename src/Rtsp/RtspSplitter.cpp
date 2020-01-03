@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -30,11 +30,7 @@
 namespace mediakit{
 
 const char *RtspSplitter::onSearchPacketTail(const char *data, int len) {
-    if(!_enableRecvRtp){
-        _isRtpPacket = false;
-        return HttpRequestSplitter::onSearchPacketTail(data, len);
-    }
-    if(data[0] != '$'){
+    if(!_enableRecvRtp || data[0] != '$'){
         //这是rtsp包
         _isRtpPacket = false;
         return HttpRequestSplitter::onSearchPacketTail(data, len);

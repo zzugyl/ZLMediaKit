@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -32,37 +32,38 @@ using namespace toolkit;
 
 namespace mediakit {
 
-MediaPlayer::MediaPlayer() {
+MediaPlayer::MediaPlayer(const EventPoller::Ptr &poller) {
+    _poller = poller;
+    if(!_poller){
+        _poller = EventPollerPool::Instance().getPoller();
+    }
 }
 
 MediaPlayer::~MediaPlayer() {
 }
 void MediaPlayer::play(const string &strUrl) {
-    _parser = PlayerBase::createPlayer(strUrl);
-	_parser->setOnShutdown(_shutdownCB);
-	_parser->setOnPlayResult(_playResultCB);
-    _parser->setMediaSouce(_pMediaSrc);
-	_parser->mINI::operator=(*this);
-	_parser->play(strUrl);
+	_delegate = PlayerBase::createPlayer(_poller,strUrl);
+	_delegate->setOnShutdown(_shutdownCB);
+	_delegate->setOnPlayResult(_playResultCB);
+    _delegate->setOnResume(_resumeCB);
+    _delegate->setMediaSouce(_pMediaSrc);
+	_delegate->mINI::operator=(*this);
+	_delegate->play(strUrl);
 }
 
 EventPoller::Ptr MediaPlayer::getPoller(){
-	auto parser = dynamic_pointer_cast<SocketHelper>(_parser);
-	if(!parser){
-		return nullptr;
-	}
-	return parser->getPoller();
+	return _poller;
 }
 
 void MediaPlayer::pause(bool bPause) {
-	if (_parser) {
-		_parser->pause(bPause);
+	if (_delegate) {
+		_delegate->pause(bPause);
 	}
 }
 
 void MediaPlayer::teardown() {
-	if (_parser) {
-		_parser->teardown();
+	if (_delegate) {
+		_delegate->teardown();
 	}
 }
 

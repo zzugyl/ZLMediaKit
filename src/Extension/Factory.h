@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -30,9 +30,8 @@
 #include <string>
 #include "Rtmp/amf.h"
 #include "Extension/Track.h"
-#include "RtspMuxer/RtspSdp.h"
-#include "RtspMuxer/RtpCodec.h"
-#include "RtmpMuxer/RtmpCodec.h"
+#include "Rtsp/RtpCodec.h"
+#include "Rtmp/RtmpCodec.h"
 
 using namespace std;
 using namespace toolkit;
@@ -56,29 +55,11 @@ public:
     static Track::Ptr getTrackBySdp(const SdpTrack::Ptr &track);
 
     /**
-    * 根据Track生成SDP对象
-    * @param track 媒体信息
-    * @return 返回sdp对象
-    */
-    static Sdp::Ptr getSdpByTrack(const Track::Ptr &track);
-
-
-    /**
-     * 根据CodecId生成Rtp打包器
-     * @param codecId
-     * @param ui32Ssrc
-     * @param ui32MtuSize
-     * @param ui32SampleRate
-     * @param ui8PlayloadType
-     * @param ui8Interleaved
+     * 根据sdp生成rtp编码器
+     * @param sdp sdp对象
      * @return
      */
-    static RtpCodec::Ptr getRtpEncoderById(CodecId codecId,
-                                           uint32_t ui32Ssrc,
-                                           uint32_t ui32MtuSize,
-                                           uint32_t ui32SampleRate,
-                                           uint8_t ui8PlayloadType,
-                                           uint8_t ui8Interleaved);
+    static RtpCodec::Ptr getRtpEncoderBySdp(const Sdp::Ptr &sdp);
 
     /**
      * 根据Track生成Rtp解包器
@@ -92,14 +73,14 @@ public:
 
     /**
      * 根据amf对象获取响应的Track
-     * @param amf rtmp metedata中的videocodecid或audiocodecid的值
+     * @param amf rtmp metadata中的videocodecid或audiocodecid的值
      * @return
      */
     static Track::Ptr getTrackByAmf(const AMFValue &amf);
 
     /**
      * 根据amf对象获取相应的CodecId
-     * @param val rtmp metedata中的videocodecid或audiocodecid的值
+     * @param val rtmp metadata中的videocodecid或audiocodecid的值
      * @return
      */
     static CodecId getCodecIdByAmf(const AMFValue &val);
@@ -119,24 +100,6 @@ public:
      */
     static AMFValue getAmfByCodecId(CodecId codecId);
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 }//namespace mediakit
 

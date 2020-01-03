@@ -1,7 +1,7 @@
-/*
+﻿/*
 * MIT License
 *
-* Copyright (c) 2016 xiongziliang <771730766@qq.com>
+* Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
 *
 * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
 *
@@ -32,33 +32,35 @@ using namespace toolkit;
 
 namespace mediakit {
 
-MediaPusher::MediaPusher(const MediaSource::Ptr &src) {
+MediaPusher::MediaPusher(const MediaSource::Ptr &src,
+                         const EventPoller::Ptr &poller) {
     _src = src;
+    _poller = poller;
+    if(!_poller){
+        _poller = EventPollerPool::Instance().getPoller();
+    }
 }
 
 MediaPusher::MediaPusher(const string &schema,
                          const string &strVhost,
                          const string &strApp,
-                         const string &strStream) {
-    _src = MediaSource::find(schema,strVhost,strApp,strStream);
+                         const string &strStream,
+                         const EventPoller::Ptr &poller) :
+        MediaPusher(MediaSource::find(schema,strVhost,strApp,strStream),poller){
 }
 
 MediaPusher::~MediaPusher() {
 }
 void MediaPusher::publish(const string &strUrl) {
-    _parser = PusherBase::createPusher(_src.lock(),strUrl);
-    _parser->setOnShutdown(_shutdownCB);
-    _parser->setOnPublished(_publishCB);
-    _parser->mINI::operator=(*this);
-    _parser->publish(strUrl);
+    _delegate = PusherBase::createPusher(_poller,_src.lock(),strUrl);
+    _delegate->setOnShutdown(_shutdownCB);
+    _delegate->setOnPublished(_publishCB);
+    _delegate->mINI::operator=(*this);
+    _delegate->publish(strUrl);
 }
 
 EventPoller::Ptr MediaPusher::getPoller(){
-    auto parser = dynamic_pointer_cast<SocketHelper>(_parser);
-    if(!parser){
-        return nullptr;
-    }
-    return parser->getPoller();
+    return _poller;
 }
 
 

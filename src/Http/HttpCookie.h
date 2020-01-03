@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -30,12 +30,16 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <map>
 #include <unordered_map>
 #include <mutex>
 using namespace std;
 
 namespace mediakit {
 
+/**
+ * http客户端cookie对象
+ */
 class HttpCookie {
 public:
     typedef std::shared_ptr<HttpCookie> Ptr;
@@ -60,6 +64,9 @@ private:
 };
 
 
+/**
+ * http客户端cookie全局保存器
+ */
 class HttpCookieStorage{
 public:
     ~HttpCookieStorage(){}
@@ -69,7 +76,7 @@ public:
 private:
     HttpCookieStorage(){};
 private:
-    unordered_map<string,unordered_map<string,HttpCookie::Ptr> > _all_cookie;
+    unordered_map<string/*host*/,map<string/*cookie path*/,map<string/*cookie_key*/,HttpCookie::Ptr> > > _all_cookie;
     mutex _mtx_cookie;
 };
 

@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -113,6 +113,15 @@ void makeAdtsHeader(const string &strAudioCfg,AACFrame &adts) {
 void getAACInfo(const AACFrame &adts,int &iSampleRate,int &iChannel){
     iSampleRate = samplingFrequencyTable[adts.sf_index];
     iChannel = adts.channel_configuration;
+}
+
+
+Sdp::Ptr AACTrack::getSdp() {
+    if(!ready()){
+        WarnL << "AAC Track未准备好";
+        return nullptr;
+    }
+    return std::make_shared<AACSdp>(getAacCfg(),getAudioSampleRate());
 }
 
 }//namespace mediakit

@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -41,7 +41,7 @@ using namespace toolkit;
 
 namespace mediakit {
 
-class DemuxerBase {
+class DemuxerBase : public TrackSource{
 public:
 	typedef std::shared_ptr<DemuxerBase> Ptr;
 
@@ -57,36 +57,13 @@ public:
 	 * @return
 	 */
 	virtual bool isInited(int analysisMs) { return true; }
-
-	/**
-	 * 获取全部的Track
-	 * @param trackReady 是否获取全部已经准备好的Track
-	 * @return
-	 */
-	virtual vector<Track::Ptr> getTracks(bool trackReady = true) const { return vector<Track::Ptr>();}
-
-	/**
-	 * 获取特定Track
-	 * @param type track类型
-	 * @param trackReady 是否获取全部已经准备好的Track
-	 * @return
-	 */
-	virtual Track::Ptr getTrack(TrackType type , bool trackReady = true) const {
-		auto tracks = getTracks(trackReady);
-		for(auto &track : tracks){
-			if(track->getTrackType() == type){
-				return track;
-			}
-		}
-		return nullptr;
-	}
 };
 
 
 class PlayerBase : public DemuxerBase, public mINI{
 public:
 	typedef std::shared_ptr<PlayerBase> Ptr;
-    static Ptr createPlayer(const string &strUrl);
+    static Ptr createPlayer(const EventPoller::Ptr &poller,const string &strUrl);
 
 	PlayerBase();
 	virtual ~PlayerBase(){}
@@ -120,6 +97,12 @@ public:
 	 */
 	virtual void setOnPlayResult( const function<void(const SockException &ex)> &cb) {}
 
+    /**
+     * 设置播放恢复回调
+     * @param cb
+     */
+    virtual void setOnResume( const function<void()> &cb) {}
+
 	/**
 	 * 获取播放进度，取值 0.0 ~ 1.0
 	 * @return
@@ -144,68 +127,88 @@ public:
      * @return
      */
 	virtual float getPacketLossRate(TrackType trackType) const {return 0; }
+
+    /**
+     * 获取所有track
+     */
+    vector<Track::Ptr> getTracks(bool trackReady = true) const override{
+        return vector<Track::Ptr>();
+    }
 protected:
     virtual void onShutdown(const SockException &ex) {}
     virtual void onPlayResult(const SockException &ex) {}
+    /**
+     * 暂停后恢复播放时间
+     */
+    virtual void onResume(){};
 };
 
-template<typename Parent,typename Parser>
-class PlayerImp : public Parent
-{
+template<typename Parent,typename Delegate>
+class PlayerImp : public Parent {
 public:
 	typedef std::shared_ptr<PlayerImp> Ptr;
-	PlayerImp(){}
+
+	template<typename ...ArgsType>
+	PlayerImp(ArgsType &&...args):Parent(std::forward<ArgsType>(args)...){}
+
 	virtual ~PlayerImp(){}
 	void setOnShutdown(const function<void(const SockException &)> &cb) override {
-		if (_parser) {
-			_parser->setOnShutdown(cb);
+		if (_delegate) {
+			_delegate->setOnShutdown(cb);
 		}
 		_shutdownCB = cb;
 	}
 	void setOnPlayResult(const function<void(const SockException &ex)> &cb) override {
-		if (_parser) {
-			_parser->setOnPlayResult(cb);
+		if (_delegate) {
+			_delegate->setOnPlayResult(cb);
 		}
 		_playResultCB = cb;
 	}
 
-    bool isInited(int analysisMs) override{
-        if (_parser) {
-            return _parser->isInited(analysisMs);
+    void setOnResume(const function<void()> &cb) override {
+        if (_delegate) {
+            _delegate->setOnResume(cb);
         }
-        return PlayerBase::isInited(analysisMs);
+        _resumeCB = cb;
+    }
+
+    bool isInited(int analysisMs) override{
+        if (_delegate) {
+            return _delegate->isInited(analysisMs);
+        }
+        return Parent::isInited(analysisMs);
     }
 	float getDuration() const override {
-		if (_parser) {
-			return _parser->getDuration();
+		if (_delegate) {
+			return _delegate->getDuration();
 		}
-		return PlayerBase::getDuration();
+		return Parent::getDuration();
 	}
     float getProgress() const override{
-        if (_parser) {
-            return _parser->getProgress();
+        if (_delegate) {
+            return _delegate->getProgress();
         }
-        return PlayerBase::getProgress();
+        return Parent::getProgress();
     }
     void seekTo(float fProgress) override{
-        if (_parser) {
-            return _parser->seekTo(fProgress);
+        if (_delegate) {
+            return _delegate->seekTo(fProgress);
         }
-        return PlayerBase::seekTo(fProgress);
+        return Parent::seekTo(fProgress);
     }
 
     void setMediaSouce(const MediaSource::Ptr & src) override {
-		if (_parser) {
-			return _parser->setMediaSouce(src);
+		if (_delegate) {
+			_delegate->setMediaSouce(src);
 		}
 		_pMediaSrc = src;
     }
 
     vector<Track::Ptr> getTracks(bool trackReady = true) const override{
-		if (_parser) {
-			return _parser->getTracks(trackReady);
+		if (_delegate) {
+			return _delegate->getTracks(trackReady);
 		}
-		return PlayerBase::getTracks(trackReady);
+		return Parent::getTracks(trackReady);
 	}
 protected:
 	void onShutdown(const SockException &ex) override {
@@ -216,43 +219,35 @@ protected:
 	}
 
 	void onPlayResult(const SockException &ex) override {
-		if(!_playResultCB){
-			return;
-		}
-		if(ex){
-			//播放失败，则立即回调
+		if(_playResultCB) {
 			_playResultCB(ex);
-			_playResultCB = nullptr;
-			return;
-		}
-		//播放成功后，我们还必须等待各个Track初始化完毕才能回调告知已经初始化完毕
-		if(isInited(0xFFFF)){
-			//初始化完毕则立即回调
-			_playResultCB(ex);
-			_playResultCB = nullptr;
-			return;
-		}
-		//播放成功却未初始化完毕，这个时候不回调汇报播放成功
-	}
-	void checkInited(int analysisMs){
-		if(!_playResultCB){
-			return;
-		}
-		if(isInited(analysisMs)){
-			_playResultCB(SockException(Err_success,"play success"));
 			_playResultCB = nullptr;
 		}
 	}
+
+	void onResume() override{
+        if(_resumeCB){
+            _resumeCB();
+        }
+    }
 protected:
 	function<void(const SockException &ex)> _shutdownCB;
 	function<void(const SockException &ex)> _playResultCB;
-	std::shared_ptr<Parser> _parser;
+    function<void()> _resumeCB;
+    std::shared_ptr<Delegate> _delegate;
 	MediaSource::Ptr _pMediaSrc;
 };
 
 
 class Demuxer : public PlayerBase{
 public:
+	class Listener{
+	public:
+		Listener() = default;
+		virtual ~Listener() = default;
+		virtual void onAddTrack(const Track::Ptr &track) = 0;
+	};
+
 	Demuxer(){};
 	virtual ~Demuxer(){};
 
@@ -269,17 +264,25 @@ public:
 	bool isInited(int analysisMs) override;
 
 	/**
-	 * 获取所有可用Track，请在isInited()返回true时调用
-	 * @return
+	 * 获取所有Track
+	 * @return 所有Track
 	 */
 	vector<Track::Ptr> getTracks(bool trackReady = true) const override;
 
 	/**
 	 * 获取节目总时长
-	 * @return
+	 * @return 节目总时长,单位秒
 	 */
 	float getDuration() const override;
+
+	/**
+	 * 设置track监听器
+	 */
+	void setTrackListener(Listener *listener);
 protected:
+	void onAddTrack(const Track::Ptr &track);
+protected:
+	Listener *_listener = nullptr;
 	AudioTrack::Ptr _audioTrack;
 	VideoTrack::Ptr _videoTrack;
 	Ticker _ticker;

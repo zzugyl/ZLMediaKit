@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -37,7 +37,7 @@ namespace mediakit {
 class RtmpPusher: public RtmpProtocol , public TcpClient , public PusherBase{
 public:
 	typedef std::shared_ptr<RtmpPusher> Ptr;
-	RtmpPusher(const RtmpMediaSource::Ptr  &src);
+	RtmpPusher(const EventPoller::Ptr &poller,const RtmpMediaSource::Ptr &src);
 	virtual ~RtmpPusher();
 
 	void publish(const string &strUrl) override ;
@@ -84,7 +84,7 @@ private:
 	inline void send_createStream();
 	inline void send_publish();
 	inline void send_metaData();
-
+	void setSocketFlags();
 private:
 	string _strApp;
 	string _strStream;

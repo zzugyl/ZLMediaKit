@@ -1,4 +1,4 @@
-//
+﻿//
 // Created by xzl on 2019/3/27.
 //
 
@@ -7,7 +7,6 @@
 
 #include <string>
 #include <memory>
-#include "Rtsp.h"
 #include "RtspMediaSource.h"
 #include "Util/util.h"
 #include "Util/logger.h"
@@ -25,7 +24,7 @@ namespace mediakit {
 class RtspPusher : public TcpClient, public RtspSplitter, public PusherBase {
 public:
     typedef std::shared_ptr<RtspPusher> Ptr;
-    RtspPusher(const RtspMediaSource::Ptr  &src);
+    RtspPusher(const EventPoller::Ptr &poller,const RtspMediaSource::Ptr &src);
     virtual ~RtspPusher();
 
     void publish(const string &strUrl) override;
@@ -66,6 +65,9 @@ private:
     void sendRtpPacket(const RtpPacket::Ptr & pkt) ;
     void sendRtspRequest(const string &cmd, const string &url ,const StrCaseMap &header = StrCaseMap(),const string &sdp = "" );
     void sendRtspRequest(const string &cmd, const string &url ,const std::initializer_list<string> &header,const string &sdp = "");
+
+    void createUdpSockIfNecessary(int track_idx);
+    void setSocketFlags();
 private:
     //rtsp鉴权相关
     string _rtspMd5Nonce;
@@ -81,7 +83,7 @@ private:
     Event _onPublished;
 
     string _strUrl;
-    SdpAttr _sdpAttr;
+    SdpParser _sdpParser;
     vector<SdpTrack::Ptr> _aTrackInfo;
     string _strSession;
     unsigned int _uiCseq = 1;

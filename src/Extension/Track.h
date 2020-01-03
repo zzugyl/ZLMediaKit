@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -39,7 +39,7 @@ namespace mediakit{
 /**
  * 媒体通道描述类，也支持帧输入输出
  */
-class Track : public FrameRingInterfaceDelegate , public CodecInfo{
+class Track : public FrameDispatcher , public CodecInfo{
 public:
     typedef std::shared_ptr<Track> Ptr;
     Track(){}
@@ -59,6 +59,12 @@ public:
      * @return
      */
     virtual Track::Ptr clone() = 0;
+
+    /**
+     * 生成sdp
+     * @return  sdp对象
+     */
+    virtual Sdp::Ptr getSdp() = 0;
 
     /**
      * 复制拷贝，只能拷贝派生类的信息，
@@ -124,6 +130,35 @@ public:
     virtual int getAudioChannel() const {return 0;};
 };
 
+
+class TrackSource{
+public:
+    TrackSource(){}
+    virtual ~TrackSource(){}
+
+    /**
+	 * 获取全部的Track
+	 * @param trackReady 是否获取全部已经准备好的Track
+	 * @return
+	 */
+    virtual vector<Track::Ptr> getTracks(bool trackReady = true) const = 0;
+
+    /**
+     * 获取特定Track
+     * @param type track类型
+     * @param trackReady 是否获取全部已经准备好的Track
+     * @return
+     */
+    Track::Ptr getTrack(TrackType type , bool trackReady = true) const {
+        auto tracks = getTracks(trackReady);
+        for(auto &track : tracks){
+            if(track->getTrackType() == type){
+                return track;
+            }
+        }
+        return nullptr;
+    }
+};
 
 }//namespace mediakit
 

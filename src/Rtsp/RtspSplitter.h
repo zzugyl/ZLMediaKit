@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -27,7 +27,7 @@
 #ifndef ZLMEDIAKIT_RTSPSPLITTER_H
 #define ZLMEDIAKIT_RTSPSPLITTER_H
 
-#include "Rtsp.h"
+#include "Common/Parser.h"
 #include "Http/HttpRequestSplitter.h"
 
 namespace mediakit{

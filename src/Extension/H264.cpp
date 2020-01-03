@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -26,15 +26,12 @@
 
 
 #include "H264.h"
-#include "H264/SPSParser.h"
+#include "SPSParser.h"
 #include "Util/logger.h"
 using namespace toolkit;
 
 namespace mediakit{
 
-bool getAVCInfo(const string& strSps,int &iVideoWidth, int &iVideoHeight, float  &iVideoFps) {
-    return getAVCInfo(strSps.data(),strSps.size(),iVideoWidth,iVideoHeight,iVideoFps);
-}
 bool getAVCInfo(const char * sps,int sps_len,int &iVideoWidth, int &iVideoHeight, float  &iVideoFps){
     T_GetBitContext tGetBitBuf;
     T_SPS tH264SpsInfo;
@@ -51,6 +48,9 @@ bool getAVCInfo(const char * sps,int sps_len,int &iVideoWidth, int &iVideoHeight
     return true;
 }
 
+bool getAVCInfo(const string& strSps,int &iVideoWidth, int &iVideoHeight, float  &iVideoFps) {
+    return getAVCInfo(strSps.data(),strSps.size(),iVideoWidth,iVideoHeight,iVideoFps);
+}
 
 const char *memfind(const char *buf, int len, const char *subbuf, int sublen) {
     for (auto i = 0; i < len - sublen; ++i) {
@@ -77,6 +77,13 @@ void splitH264(const char *ptr, int len, const std::function<void(const char *, 
 }
 
 
+Sdp::Ptr H264Track::getSdp() {
+    if(!ready()){
+        WarnL << "H264 Track未准备好";
+        return nullptr;
+    }
+    return std::make_shared<H264Sdp>(getSps(),getPps());
+}
 }//namespace mediakit
 
 

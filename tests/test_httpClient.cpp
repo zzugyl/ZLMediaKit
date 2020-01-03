@@ -1,7 +1,7 @@
-/*
+﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -48,15 +48,19 @@ int main(int argc, char *argv[]) {
     Logger::Instance().add(std::make_shared<ConsoleChannel>());
     Logger::Instance().setWriter(std::make_shared<AsyncLogWriter>());
 
+    //加载证书，证书包含公钥和私钥
+    SSL_Initor::Instance().loadCertificate((exeDir() + "ssl.p12").data());
+    //信任某个自签名证书
+    SSL_Initor::Instance().trustCertificate((exeDir() + "ssl.p12").data());
+    //不忽略无效证书证书(例如自签名或过期证书)
+    SSL_Initor::Instance().ignoreInvalidCertificate(false);
+
     ///////////////////////////////http downloader///////////////////////
     //下载器map
     map<string, HttpDownloader::Ptr> downloaderMap;
     //下载两个文件，一个是http下载，一个https下载
-    auto urlList = {"https://timgsa.baidu.com/timg?image&quality=80&"
-                    "size=b9999_10000&sec=1537717640404&"
-                    "di=f602efbebbc1e7f6b9ccb0bf0def89d0&"
-                    "imgtype=0&"
-                    "src=http%3A%2F%2Fimgsrc.baidu.com%2Fimgad%2Fpic%2Fitem%2F241f95cad1c8a786ff65052a6d09c93d70cf5042.jpg",};
+    auto urlList = {"http://www.baidu.com/img/baidu_resultlogo@2.png",
+                    "https://www.baidu.com/img/baidu_resultlogo@2.png"};
 
     for (auto &url : urlList) {
         //创建下载器

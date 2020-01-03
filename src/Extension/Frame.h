@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -50,7 +50,7 @@ typedef enum {
     TrackVideo = 0,
     TrackAudio,
     TrackTitle,
-    TrackMax = 0x7FFF
+    TrackMax = 3
 } TrackType;
 
 /**
@@ -77,7 +77,7 @@ public:
 /**
  * 帧类型的抽象接口
  */
-class Frame : public Buffer, public CodecInfo{
+class Frame : public Buffer, public CodecInfo {
 public:
     typedef std::shared_ptr<Frame> Ptr;
     virtual ~Frame(){}
@@ -116,6 +116,23 @@ public:
      * @return
      */
     virtual bool keyFrame() const = 0;
+
+    /**
+     * 是否为配置帧，譬如sps pps vps
+     * @return
+     */
+    virtual bool configFrame() const = 0;
+
+    /**
+     * 是否可以缓存
+     */
+    virtual bool cacheAble() const { return true; }
+
+    /**
+     * 返回可缓存的frame
+     * @return
+     */
+    static Ptr getCacheAbleFrame(const Ptr &frame);
 };
 
 /**
@@ -182,78 +199,14 @@ private:
 
 
 /**
- * 帧环形缓存接口类
- */
-class FrameRingInterface : public FrameWriterInterface{
-public:
-    typedef RingBuffer<Frame::Ptr> RingType;
-    typedef std::shared_ptr<FrameRingInterface> Ptr;
-
-    FrameRingInterface(){}
-    virtual ~FrameRingInterface(){}
-
-    /**
-     * 获取帧环形缓存
-     * @return
-     */
-    virtual RingType::Ptr getFrameRing() const = 0;
-
-    /**
-     * 设置帧环形缓存
-     * @param ring
-     */
-    virtual void setFrameRing(const RingType::Ptr &ring)  = 0;
-};
-
-/**
- * 帧环形缓存
- */
-class FrameRing : public FrameRingInterface{
-public:
-    typedef std::shared_ptr<FrameRing> Ptr;
-
-    FrameRing(){
-    }
-    virtual ~FrameRing(){}
-
-    /**
-     * 获取帧环形缓存
-     * @return
-     */
-    RingType::Ptr getFrameRing() const override {
-        return _frameRing;
-    }
-
-    /**
-     * 设置帧环形缓存
-     * @param ring
-     */
-    void setFrameRing(const RingType::Ptr &ring) override {
-        _frameRing = ring;
-    }
-
-    /**
-     * 输入数据帧
-     * @param frame
-     */
-    void inputFrame(const Frame::Ptr &frame) override{
-        if(_frameRing){
-            _frameRing->write(frame,frame->keyFrame());
-        }
-    }
-protected:
-    RingType::Ptr _frameRing;
-};
-
-/**
  * 支持代理转发的帧环形缓存
  */
-class FrameRingInterfaceDelegate : public FrameRing {
+class FrameDispatcher : public FrameWriterInterface {
 public:
-    typedef std::shared_ptr<FrameRingInterfaceDelegate> Ptr;
+    typedef std::shared_ptr<FrameDispatcher> Ptr;
 
-    FrameRingInterfaceDelegate(){}
-    virtual ~FrameRingInterfaceDelegate(){}
+    FrameDispatcher(){}
+    virtual ~FrameDispatcher(){}
 
     void addDelegate(const FrameWriterInterface::Ptr &delegate){
         lock_guard<mutex> lck(_mtx);
@@ -270,7 +223,6 @@ public:
      * @param frame 帧
      */
     void inputFrame(const Frame::Ptr &frame) override{
-        FrameRing::inputFrame(frame);
         lock_guard<mutex> lck(_mtx);
         for(auto &pr : _delegateMap){
             pr.second->inputFrame(frame);
@@ -281,30 +233,121 @@ private:
     map<void *,FrameWriterInterface::Ptr>  _delegateMap;
 };
 
-class FrameNoCopyAble : public Frame{
+/**
+ * 通过Frame接口包装指针，方便使用者把自己的数据快速接入ZLMediaKit
+ */
+class FrameFromPtr : public Frame{
 public:
-    typedef std::shared_ptr<FrameNoCopyAble> Ptr;
+    typedef std::shared_ptr<FrameFromPtr> Ptr;
     char *data() const override{
-        return buffer_ptr;
+        return _ptr;
     }
     uint32_t size() const override {
-        return buffer_size;
+        return _size;
     }
+
     uint32_t dts() const override {
-        return timeStamp;
+        return _dts;
     }
+
+    uint32_t pts() const override{
+        if(_pts){
+            return _pts;
+        }
+        return dts();
+    }
+
     uint32_t prefixSize() const override{
-        return iPrefixSize;
+        return _prefixSize;
     }
-public:
-    char *buffer_ptr;
-    uint32_t buffer_size;
-    uint32_t timeStamp;
-    uint32_t iPrefixSize;
+protected:
+    char *_ptr;
+    uint32_t _size;
+    uint32_t _dts;
+    uint32_t _pts = 0;
+    uint32_t _prefixSize;
 };
 
+/**
+ * 不可缓存的帧，在DevChannel类中有用到。
+ * 该帧类型用于防止内存拷贝，直接使用指针传递数据
+ * 在大多数情况下，ZLMediaKit是同步对帧数据进行使用和处理的
+ * 所以提供此类型的帧很有必要，但是有时又无法避免缓存帧做后续处理
+ * 所以可以通过Frame::getCacheAbleFrame方法拷贝一个可缓存的帧
+ */
+class FrameNoCacheAble : public FrameFromPtr{
+public:
+    typedef std::shared_ptr<FrameNoCacheAble> Ptr;
 
+    /**
+     * 该帧不可缓存
+     * @return
+     */
+    bool cacheAble() const override {
+        return false;
+    }
+};
 
+/**
+ * 该对象的功能是把一个不可缓存的帧转换成可缓存的帧
+ * @see FrameNoCacheAble
+ */
+class FrameCacheAble : public FrameFromPtr {
+public:
+    typedef std::shared_ptr<FrameCacheAble> Ptr;
+
+    FrameCacheAble(const Frame::Ptr &frame){
+        if(frame->cacheAble()){
+            _frame = frame;
+            _ptr = frame->data();
+        }else{
+            _buffer = std::make_shared<BufferRaw>();
+            _buffer->assign(frame->data(),frame->size());
+            _ptr = _buffer->data();
+        }
+        _size = frame->size();
+        _dts = frame->dts();
+        _pts = frame->pts();
+        _prefixSize = frame->prefixSize();
+        _trackType = frame->getTrackType();
+        _codec = frame->getCodecId();
+        _key = frame->keyFrame();
+        _config = frame->configFrame();
+    }
+
+    virtual ~FrameCacheAble() = default;
+
+    /**
+     * 可以被缓存
+     * @return
+     */
+    bool cacheAble() const override {
+        return true;
+    }
+
+    TrackType getTrackType() const override{
+        return _trackType;
+    }
+
+    CodecId getCodecId() const override{
+        return _codec;
+    }
+
+    bool keyFrame() const override{
+        return _key;
+    }
+
+    bool configFrame() const override{
+        return _config;
+    }
+private:
+    Frame::Ptr _frame;
+    BufferRaw::Ptr _buffer;
+    TrackType _trackType;
+    CodecId _codec;
+    bool _key;
+    bool _config;
+};
 
 
 }//namespace mediakit

@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -31,19 +31,21 @@
 #include <string.h>
 #include <functional>
 #include <memory>
-#include "Rtsp/Rtsp.h"
 #include "Util/util.h"
+#include "Util/mini.h"
 #include "Network/TcpClient.h"
+#include "Common/Parser.h"
 #include "HttpRequestSplitter.h"
 #include "HttpCookie.h"
 #include "HttpChunkedSplitter.h"
-
+#include "strCoding.h"
+#include "HttpBody.h"
 using namespace std;
 using namespace toolkit;
 
 namespace mediakit {
 
-class HttpArgs : public StrCaseMap {
+class HttpArgs : public map<string, variant, StrCaseCompare>  {
 public:
     HttpArgs(){}
     virtual ~HttpArgs(){}
@@ -52,7 +54,7 @@ public:
         for(auto &pr : *this){
             ret.append(pr.first);
             ret.append("=");
-            ret.append(pr.second);
+            ret.append(strCoding::UrlEncode(pr.second));
             ret.append("&");
         }
         if(ret.size()){
@@ -61,143 +63,6 @@ public:
         return ret;
     }
 };
-
-class HttpBody{
-public:
-    typedef std::shared_ptr<HttpBody> Ptr;
-    HttpBody(){}
-    virtual ~HttpBody(){}
-    //剩余数据大小
-    virtual uint64_t remainSize() = 0;
-    virtual Buffer::Ptr readData() = 0;
-};
-
-class HttpStringBody : public HttpBody{
-public:
-    typedef std::shared_ptr<HttpStringBody> Ptr;
-    HttpStringBody(const string &str){
-        _str = str;
-    }
-    virtual ~HttpStringBody(){}
-
-    uint64_t remainSize() override {
-        return _str.size();
-    }
-    Buffer::Ptr readData() override {
-        auto ret = std::make_shared<BufferString>(_str);
-        _str.clear();
-        return ret;
-    }
-private:
-    mutable string _str;
-};
-
-
-class HttpMultiFormBody : public HttpBody {
-public:
-    typedef std::shared_ptr<HttpMultiFormBody> Ptr;
-    HttpMultiFormBody(const StrCaseMap &args,const string &filePath,const string &boundary,uint32_t sliceSize = 4 * 1024){
-        _fp = fopen(filePath.data(),"rb");
-        if(!_fp){
-            throw std::invalid_argument(StrPrinter << "打开文件失败：" << filePath << " " << get_uv_errmsg());
-        }
-        auto fileName = filePath;
-        auto pos = filePath.rfind('/');
-        if(pos != string::npos){
-            fileName = filePath.substr(pos + 1);
-        }
-        _bodyPrefix = multiFormBodyPrefix(args,boundary,fileName);
-        _bodySuffix = multiFormBodySuffix(boundary);
-        _totalSize =  _bodyPrefix.size() + _bodySuffix.size() + fileSize(_fp);
-        _sliceSize = sliceSize;
-    }
-    virtual ~HttpMultiFormBody(){
-        fclose(_fp);
-    }
-
-    uint64_t remainSize() override {
-        return _totalSize - _offset;
-    }
-
-    Buffer::Ptr readData() override{
-        if(_bodyPrefix.size()){
-            auto ret = std::make_shared<BufferString>(_bodyPrefix);
-            _offset += _bodyPrefix.size();
-            _bodyPrefix.clear();
-            return ret;
-        }
-
-        if(0 == feof(_fp)){
-            auto ret = std::make_shared<BufferRaw>(_sliceSize);
-            //读文件
-            int size;
-            do{
-                size = fread(ret->data(),1,_sliceSize,_fp);
-            }while(-1 == size && UV_EINTR == get_uv_error(false));
-
-            if(size == -1){
-                _offset = _totalSize;
-                WarnL << "fread failed:" << get_uv_errmsg();
-                return nullptr;
-            }
-            _offset += size;
-            ret->setSize(size);
-            return ret;
-        }
-
-        if(_bodySuffix.size()){
-            auto ret = std::make_shared<BufferString>(_bodySuffix);
-            _offset = _totalSize;
-            _bodySuffix.clear();
-            return ret;
-        }
-
-        return nullptr;
-    }
-
-public:
-    static string multiFormBodyPrefix(const StrCaseMap &args,const string &boundary,const string &fileName){
-        string MPboundary = string("--") + boundary;
-        _StrPrinter body;
-        for(auto &pr : args){
-            body << MPboundary << "\r\n";
-            body << "Content-Disposition: form-data; name=\"" << pr.first << "\"\r\n\r\n";
-            body << pr.second << "\r\n";
-        }
-        body << MPboundary << "\r\n";
-        body << "Content-Disposition: form-data; name=\"" << "file" << "\";filename=\"" << fileName << "\"\r\n";
-        body << "Content-Type: application/octet-stream\r\n\r\n" ;
-        return body;
-    }
-    static string multiFormBodySuffix(const string &boundary){
-        string MPboundary = string("--") + boundary;
-        string endMPboundary = MPboundary + "--";
-        _StrPrinter body;
-        body << "\r\n" << endMPboundary;
-        return body;
-    }
-
-    static uint64_t fileSize(FILE *fp) {
-        auto current = ftell(fp);
-        fseek(fp,0L,SEEK_END); /* 定位到文件末尾 */
-        auto end  = ftell(fp); /* 得到文件大小 */
-        fseek(fp,current,SEEK_SET);
-        return end - current;
-    }
-
-    static string multiFormContentType(const string &boundary){
-        return StrPrinter << "multipart/form-data; boundary=" << boundary;
-    }
-private:
-    FILE *_fp;
-    string _bodyPrefix;
-    string _bodySuffix;
-    uint64_t _offset = 0;
-    uint64_t _totalSize;
-    uint32_t _sliceSize;
-};
-
-
 
 class HttpClient : public TcpClient , public HttpRequestSplitter
 {
@@ -217,7 +82,6 @@ public:
         _recvedBodySize = 0;
         _totalBodySize = 0;
         _aliveTicker.resetTime();
-        _fTimeOutSec = 0;
         _chunkedSplitter.reset();
         HttpRequestSplitter::reset();
     }
@@ -250,6 +114,10 @@ public:
     }
     const Parser& response() const{
         return _parser;
+    }
+
+    const string &getUrl() const{
+        return _url;
     }
 protected:
     /**
@@ -289,6 +157,14 @@ protected:
      */
     virtual void onDisconnect(const SockException &ex){}
 
+    /**
+     * 重定向事件
+     * @param url 重定向url
+     * @param temporary 是否为临时重定向
+     * @return 是否继续
+     */
+    virtual bool onRedirectUrl(const string &url,bool temporary){ return true;};
+
     //HttpRequestSplitter override
     int64_t onRecvHeader(const char *data,uint64_t len) override ;
     void onRecvContent(const char *data,uint64_t len) override;
@@ -296,7 +172,7 @@ protected:
     virtual void onConnect(const SockException &ex) override;
     virtual void onRecv(const Buffer::Ptr &pBuf) override;
     virtual void onErr(const SockException &ex) override;
-    virtual void onSend() override;
+    virtual void onFlush() override;
     virtual void onManager() override;
 private:
     void onResponseCompleted_l();
@@ -304,6 +180,7 @@ private:
 protected:
     bool _isHttps;
 private:
+    string _url;
     HttpHeader _header;
     HttpBody::Ptr _body;
     string _method;

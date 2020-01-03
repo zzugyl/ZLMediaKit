@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -38,6 +38,7 @@ public:
     typedef std::function<void(const SockException &ex,const string &status,const HttpHeader &header,const string &strRecvBody)> HttpRequesterResult;
     HttpRequester();
     virtual ~HttpRequester();
+    void setOnResult(const HttpRequesterResult &onResult);
     void startRequester(const string &url,const HttpRequesterResult &onResult,float timeOutSecond = 10);
     void clear() override ;
 private:

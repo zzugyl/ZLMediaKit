@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -49,6 +49,29 @@ typedef enum {
 } eRtpType;
 };
 
+class RtpPacket : public BufferRaw{
+public:
+	typedef std::shared_ptr<RtpPacket> Ptr;
+	uint8_t interleaved;
+	uint8_t PT;
+	bool mark;
+	//时间戳，单位毫秒
+	uint32_t timeStamp;
+	uint16_t sequence;
+	uint32_t ssrc;
+	uint32_t offset;
+	TrackType type;
+};
+
+class RtcpCounter {
+public:
+	uint32_t pktCnt = 0;
+	uint32_t octCount = 0;
+	//网络字节序
+	uint32_t timeStamp = 0;
+	uint32_t lastTimeStamp = 0;
+};
+
 class SdpTrack {
 public:
 	typedef std::shared_ptr<SdpTrack> Ptr;
@@ -67,6 +90,8 @@ public:
 
 	map<char, string> _other;
 	map<string, string> _attr;
+
+	string toString() const;
 public:
 	int _pt;
 	string _codec;
@@ -84,164 +109,124 @@ public:
 	uint32_t _time_stamp = 0;
 };
 
-class SdpAttr {
+class SdpParser {
 public:
-	typedef std::shared_ptr<SdpAttr> Ptr;
+	typedef std::shared_ptr<SdpParser> Ptr;
 
-	SdpAttr() {}
-
-	SdpAttr(const string &sdp) { load(sdp); }
-
-	~SdpAttr() {}
-
+	SdpParser() {}
+	SdpParser(const string &sdp) { load(sdp); }
+	~SdpParser() {}
 	void load(const string &sdp);
-
 	bool available() const;
-
 	SdpTrack::Ptr getTrack(TrackType type) const;
-
 	vector<SdpTrack::Ptr> getAvailableTrack() const;
-
+	string toString() const ;
 private:
 	map<string, SdpTrack::Ptr> _track_map;
 };
 
 
-class RtcpCounter {
+/**
+* rtsp sdp基类
+*/
+class Sdp : public CodecInfo{
 public:
-	uint32_t pktCnt = 0;
-	uint32_t octCount = 0;
-	uint32_t timeStamp = 0;
-};
+	typedef std::shared_ptr<Sdp> Ptr;
 
-string FindField(const char *buf, const char *start, const char *end, int bufSize = 0);
-
-struct StrCaseCompare {
-	bool operator()(const string &__x, const string &__y) const { return strcasecmp(__x.data(), __y.data()) < 0; }
-};
-
-typedef map<string, string, StrCaseCompare> StrCaseMap;
-
-class Parser {
-public:
-	Parser() {}
-
-	virtual ~Parser() {}
-
-	void Parse(const char *buf) {
-		//解析
-		const char *start = buf;
-		Clear();
-		while (true) {
-			auto line = FindField(start, NULL, "\r\n");
-			if (line.size() == 0) {
-				break;
-			}
-			if (start == buf) {
-				_strMethod = FindField(line.data(), NULL, " ");
-				_strFullUrl = FindField(line.data(), " ", " ");
-				auto args_pos = _strFullUrl.find('?');
-				if (args_pos != string::npos) {
-					_strUrl = _strFullUrl.substr(0, args_pos);
-					_mapUrlArgs = parseArgs(_strFullUrl.substr(args_pos + 1));
-				} else {
-					_strUrl = _strFullUrl;
-				}
-				_strTail = FindField(line.data(), (_strFullUrl + " ").data(), NULL);
-			} else {
-				auto field = FindField(line.data(), NULL, ": ");
-				auto value = FindField(line.data(), ": ", NULL);
-				if (field.size() != 0) {
-					_mapHeaders[field] = value;
-				}
-			}
-			start = start + line.size() + 2;
-			if (strncmp(start, "\r\n", 2) == 0) { //协议解析完毕
-				_strContent = FindField(start, "\r\n", NULL);
-				break;
-			}
-		}
+	/**
+	 * 构造sdp
+	 * @param sample_rate 采样率
+	 * @param playload_type pt类型
+	 */
+	Sdp(uint32_t sample_rate, uint8_t playload_type){
+		_sample_rate = sample_rate;
+		_playload_type = playload_type;
 	}
 
-	const string &Method() const {
-		//rtsp方法
-		return _strMethod;
+	virtual ~Sdp(){}
+
+	/**
+	 * 获取sdp字符串
+	 * @return
+	 */
+	virtual string getSdp() const  = 0;
+
+	/**
+	 * 获取pt
+	 * @return
+	 */
+	uint8_t getPlayloadType() const{
+		return _playload_type;
 	}
 
-	const string &Url() const {
-		//rtsp url
-		return _strUrl;
+	/**
+	 * 获取采样率
+	 * @return
+	 */
+	uint32_t getSampleRate() const{
+		return _sample_rate;
 	}
-
-	const string &FullUrl() const {
-		//rtsp url with args
-		return _strFullUrl;
-	}
-
-	const string &Tail() const {
-		//RTSP/1.0
-		return _strTail;
-	}
-
-	const string &operator[](const char *name) const {
-		//rtsp field
-		auto it = _mapHeaders.find(name);
-		if (it == _mapHeaders.end()) {
-			return _strNull;
-		}
-		return it->second;
-	}
-
-	const string &Content() const {
-		return _strContent;
-	}
-
-	void Clear() {
-		_strMethod.clear();
-		_strUrl.clear();
-		_strFullUrl.clear();
-		_strTail.clear();
-		_strContent.clear();
-		_mapHeaders.clear();
-		_mapUrlArgs.clear();
-	}
-
-	void setUrl(const string &url) {
-		this->_strUrl = url;
-	}
-
-	void setContent(const string &content) {
-		this->_strContent = content;
-	}
-
-	StrCaseMap &getValues() const {
-		return _mapHeaders;
-	}
-
-	StrCaseMap &getUrlArgs() const {
-		return _mapUrlArgs;
-	}
-
-	static StrCaseMap parseArgs(const string &str, const char *pair_delim = "&", const char *key_delim = "=") {
-		StrCaseMap ret;
-		auto arg_vec = split(str, pair_delim);
-		for (string &key_val : arg_vec) {
-			auto key = FindField(key_val.data(), NULL, key_delim);
-			auto val = FindField(key_val.data(), key_delim, NULL);
-			ret[key] = val;
-		}
-		return ret;
-	}
-
 private:
-	string _strMethod;
-	string _strUrl;
-	string _strTail;
-	string _strContent;
-	string _strNull;
-	string _strFullUrl;
-	mutable StrCaseMap _mapHeaders;
-	mutable StrCaseMap _mapUrlArgs;
+	uint8_t _playload_type;
+	uint32_t _sample_rate;
+};
+
+/**
+* sdp中除音视频外的其他描述部分
+*/
+class TitleSdp : public Sdp{
+public:
+
+	/**
+	 * 构造title类型sdp
+	 * @param dur_sec rtsp点播时长，0代表直播，单位秒
+	 * @param header 自定义sdp描述
+	 * @param version sdp版本
+	 */
+	TitleSdp(float dur_sec = 0,
+			 const map<string,string> &header = map<string,string>(),
+			 int version = 0) : Sdp(0,0){
+		_printer << "v=" << version << "\r\n";
+
+		if(!header.empty()){
+			for (auto &pr : header){
+				_printer << pr.first << "=" << pr.second << "\r\n";
+			}
+		} else {
+			_printer << "o=- 1383190487994921 1 IN IP4 0.0.0.0\r\n";
+			_printer << "s=RTSP Session, streamed by the ZLMediaKit\r\n";
+			_printer << "i=ZLMediaKit Live Stream\r\n";
+			_printer << "c=IN IP4 0.0.0.0\r\n";
+			_printer << "t=0 0\r\n";
+		}
+
+		if(dur_sec <= 0){
+			_printer << "a=range:npt=0-\r\n";
+		}else{
+			_printer << "a=range:npt=0-" << dur_sec  << "\r\n";
+		}
+		_printer << "a=control:*\r\n";
+	}
+	string getSdp() const override {
+		return _printer;
+	}
+	/**
+	 * 返回音频或视频类型
+	 * @return
+	 */
+	TrackType getTrackType() const override {
+		return TrackTitle;
+	}
+
+	/**
+	 * 返回编码器id
+	 * @return
+	 */
+	CodecId getCodecId() const override{
+		return CodecInvalid;
+	}
+private:
+	_StrPrinter _printer;
 };
 
 } //namespace mediakit

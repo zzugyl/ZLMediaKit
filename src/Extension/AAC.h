@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -29,8 +29,6 @@
 
 #include "Frame.h"
 #include "Track.h"
-#include "RtspMuxer/RtspSdp.h"
-
 
 namespace mediakit{
 
@@ -50,7 +48,7 @@ string 	makeAdtsConfig(const uint8_t *pcAdts);
 void 	getAACInfo(const AACFrame &adts,int &iSampleRate,int &iChannel);
 
 
-    /**
+/**
  * aac帧，包含adts头
  */
 class AACFrame : public Frame {
@@ -81,6 +79,10 @@ public:
     bool keyFrame() const override {
         return false;
     }
+
+    bool configFrame() const override{
+        return false;
+    }
 public:
     unsigned int syncword = 0; //12 bslbf 同步字The bit string ‘1111 1111 1111’，说明一个ADTS帧的开始
     unsigned int id;        //1 bslbf   MPEG 标示符, 设置为1
@@ -107,15 +109,15 @@ public:
     uint32_t iPrefixSize = 7;
 } ;
 
-class AACFrameNoCopyAble : public FrameNoCopyAble {
+class AACFrameNoCacheAble : public FrameNoCacheAble {
 public:
-    typedef std::shared_ptr<AACFrameNoCopyAble> Ptr;
+    typedef std::shared_ptr<AACFrameNoCacheAble> Ptr;
 
-    AACFrameNoCopyAble(char *ptr,uint32_t size,uint32_t stamp,int prefixeSize = 7){
-        buffer_ptr = ptr;
-        buffer_size = size;
-        timeStamp = stamp;
-        iPrefixSize = prefixeSize;
+    AACFrameNoCacheAble(char *ptr,uint32_t size,uint32_t dts,int prefixeSize = 7){
+        _ptr = ptr;
+        _size = size;
+        _dts = dts;
+        _prefixSize = prefixeSize;
     }
 
     TrackType getTrackType() const override{
@@ -127,6 +129,10 @@ public:
     }
 
     bool keyFrame() const override {
+        return false;
+    }
+
+    bool configFrame() const override{
         return false;
     }
 } ;
@@ -150,10 +156,10 @@ public:
      * @param aac_cfg aac两个字节的配置信息
      */
     AACTrack(const string &aac_cfg){
-        if(aac_cfg.size() != 2){
-            throw std::invalid_argument("adts配置必须为2个字节");
+        if(aac_cfg.size() < 2){
+            throw std::invalid_argument("adts配置必须最少2个字节");
         }
-        _cfg = aac_cfg;
+        _cfg = aac_cfg.substr(0,2);
         onReady();
     }
 
@@ -251,6 +257,9 @@ private:
      * 解析2个字节的aac配置
      */
     void onReady(){
+        if(_cfg.size() < 2){
+            return;
+        }
         AACFrame aacFrame;
         makeAdtsHeader(_cfg,aacFrame);
         getAACInfo(aacFrame,_sampleRate,_channel);
@@ -258,6 +267,9 @@ private:
     Track::Ptr clone() override {
         return std::make_shared<std::remove_reference<decltype(*this)>::type >(*this);
     }
+
+    //生成sdp
+    Sdp::Ptr getSdp() override ;
 private:
     string _cfg;
     int _sampleRate = 0;

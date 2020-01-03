@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -25,7 +25,6 @@
  */
 #include "RtmpPusher.h"
 #include "Rtmp/utils.h"
-#include "Rtsp/Rtsp.h"
 #include "Util/util.h"
 #include "Util/onceToken.h"
 #include "Thread/ThreadPool.h"
@@ -34,9 +33,7 @@ using namespace mediakit::Client;
 
 namespace mediakit {
 
-static int kSockFlags = SOCKET_DEFAULE_FLAGS | FLAG_MORE;
-
-RtmpPusher::RtmpPusher(const RtmpMediaSource::Ptr &src){
+RtmpPusher::RtmpPusher(const EventPoller::Ptr &poller,const RtmpMediaSource::Ptr &src) : TcpClient(poller){
 	_pMediaSrc=src;
 }
 
@@ -59,7 +56,7 @@ void RtmpPusher::teardown() {
         }
 		_pPublishTimer.reset();
         reset();
-        shutdown();
+        shutdown(SockException(Err_shutdown,"teardown"));
 	}
 }
 
@@ -130,6 +127,9 @@ void RtmpPusher::onConnect(const SockException &err){
 		onPublishResult(err);
 		return;
 	}
+	//推流器不需要多大的接收缓存，节省内存占用
+	_sock->setReadBuffer(std::make_shared<BufferRaw>(1 * 1024));
+
 	weak_ptr<RtmpPusher> weakSelf = dynamic_pointer_cast<RtmpPusher>(shared_from_this());
 	startClientSession([weakSelf](){
         auto strongSelf=weakSelf.lock();
@@ -227,10 +227,19 @@ inline void RtmpPusher::send_metaData(){
         }
     });
     onPublishResult(SockException(Err_success,"success"));
-	//提高发送性能
-	(*this) << SocketFlags(kSockFlags);
-	SockUtil::setNoDelay(_sock->rawFD(),false);
+	//提升发送性能
+	setSocketFlags();
 }
+
+void RtmpPusher::setSocketFlags(){
+	GET_CONFIG(bool,ultraLowDelay,General::kUltraLowDelay);
+	if(!ultraLowDelay) {
+        //提高发送性能
+        (*this) << SocketFlags(SOCKET_DEFAULE_FLAGS | FLAG_MORE);
+        SockUtil::setNoDelay(_sock->rawFD(), false);
+	}
+}
+
 void RtmpPusher::onCmd_result(AMFDecoder &dec){
 	auto iReqId = dec.load<int>();
 	lock_guard<recursive_mutex> lck(_mtxOnResultCB);

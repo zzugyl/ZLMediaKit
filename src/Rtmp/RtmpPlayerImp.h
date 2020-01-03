@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -32,7 +32,7 @@
 #include "Common/config.h"
 #include "RtmpPlayer.h"
 #include "RtmpMediaSource.h"
-#include "RtmpMuxer/RtmpDemuxer.h"
+#include "RtmpDemuxer.h"
 #include "Poller/Timer.h"
 #include "Util/TimeTicker.h"
 using namespace toolkit;
@@ -43,7 +43,7 @@ namespace mediakit {
 class RtmpPlayerImp: public PlayerImp<RtmpPlayer,RtmpDemuxer> {
 public:
     typedef std::shared_ptr<RtmpPlayerImp> Ptr;
-    RtmpPlayerImp(){};
+    RtmpPlayerImp(const EventPoller::Ptr &poller) : PlayerImp<RtmpPlayer,RtmpDemuxer>(poller){};
     virtual ~RtmpPlayerImp(){
         DebugL<<endl;
     };
@@ -58,34 +58,31 @@ public:
         seekToMilliSecond(fProgress * getDuration() * 1000);
     };
     void play(const string &strUrl) override {
-        _analysisMs = (*this)[kMaxAnalysisMS].as<int>();
         PlayerImp<RtmpPlayer,RtmpDemuxer>::play(strUrl);
     }
 private:
     //派生类回调函数
-    bool onCheckMeta(AMFValue &val)  override {
+    bool onCheckMeta(const AMFValue &val) override {
         _pRtmpMediaSrc = dynamic_pointer_cast<RtmpMediaSource>(_pMediaSrc);
         if(_pRtmpMediaSrc){
-            _pRtmpMediaSrc->onGetMetaData(val);
+            _pRtmpMediaSrc->setMetaData(val);
         }
-        _parser.reset(new RtmpDemuxer(val));
+        _delegate.reset(new RtmpDemuxer);
+        _delegate->loadMetaData(val);
         return true;
     }
     void onMediaData(const RtmpPacket::Ptr &chunkData) override {
     	if(_pRtmpMediaSrc){
             _pRtmpMediaSrc->onWrite(chunkData);
         }
-        if(!_parser){
-    	    //这个流没有metedata，那么尝试在音视频包里面还原出相关信息
-            _parser.reset(new RtmpDemuxer());
-            onPlayResult_l(SockException(Err_success,"play rtmp success"));
+        if(!_delegate){
+    	    //这个流没有metadata
+            _delegate.reset(new RtmpDemuxer());
         }
-        _parser->inputRtmp(chunkData);
-        checkInited(_analysisMs);
+        _delegate->inputRtmp(chunkData);
     }
 private:
     RtmpMediaSource::Ptr _pRtmpMediaSrc;
-    int _analysisMs;
 };
 
 

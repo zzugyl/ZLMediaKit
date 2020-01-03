@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -49,26 +49,54 @@ public:
 	PlayerProxy(const string &strVhost,
                 const string &strApp,
                 const string &strSrc,
+				bool bEnableRtsp = true,
+				bool bEnableRtmp = true,
                 bool bEnableHls = true,
                 bool bEnableMp4 = false,
-                int iRetryCount = -1);
+                int iRetryCount = -1,
+				const EventPoller::Ptr &poller = nullptr);
 
 	virtual ~PlayerProxy();
 
-	void play(const string &strUrl) override;
-    bool close() override;
+    /**
+     * 设置play结果回调，只触发一次；在play执行之前有效
+     * @param cb
+     */
+    void setPlayCallbackOnce(const function<void(const SockException &ex)> &cb);
+
+    /**
+     * 设置主动关闭回调
+     * @param cb
+     */
+    void setOnClose(const function<void()> &cb);
+
+    /**
+     * 开始拉流播放
+     * @param strUrl
+     */
+    void play(const string &strUrl) override;
 private:
+	//MediaSourceEvent override
+	bool close(MediaSource &sender,bool force) override;
+    void onNoneReader(MediaSource &sender) override;
+	int totalReaderCount(MediaSource &sender) override;
+	int totalReaderCount() ;
+
 	void rePlay(const string &strUrl,int iFailedCnt);
 	void onPlaySuccess();
 private:
-    bool _bEnableHls;
-    bool _bEnableMp4;
+    bool _bEnableRtsp;
+    bool _bEnableRtmp;
+	bool _bEnableHls;
+	bool _bEnableMp4;
     int _iRetryCount;
 	MultiMediaSourceMuxer::Ptr _mediaMuxer;
     string _strVhost;
     string _strApp;
     string _strSrc;
     Timer::Ptr _timer;
+    function<void(const SockException &ex)> _playCB;
+    function<void()> _onClose;
 };
 
 } /* namespace mediakit */

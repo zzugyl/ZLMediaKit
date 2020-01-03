@@ -1,7 +1,7 @@
-/*
+﻿/*
 * MIT License
 *
-* Copyright (c) 2016 xiongziliang <771730766@qq.com>
+* Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
 *
 * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
 *
@@ -42,15 +42,18 @@ public:
     MediaPusher(const string &schema,
                 const string &strVhost,
                 const string &strApp,
-                const string &strStream);
+                const string &strStream,
+                const EventPoller::Ptr &poller = nullptr);
 
-    MediaPusher(const MediaSource::Ptr &src);
+    MediaPusher(const MediaSource::Ptr &src,
+                const EventPoller::Ptr &poller = nullptr);
 
     virtual ~MediaPusher();
     void publish(const string &strUrl) override;
     EventPoller::Ptr getPoller();
 private:
     std::weak_ptr<MediaSource> _src;
+    EventPoller::Ptr _poller;
 };
 
 } /* namespace mediakit */

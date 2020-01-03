@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -26,34 +26,66 @@
 
 #include <stdlib.h>
 #include "Rtsp.h"
+#include "Common/Parser.h"
 
 namespace mediakit{
 
-string FindField(const char* buf, const char* start, const char *end ,int bufSize) {
-	if(bufSize <=0 ){
-		bufSize = strlen(buf);
-	}
-	const char *msg_start = buf, *msg_end = buf + bufSize;
-	int len = 0;
-	if (start != NULL) {
-		len = strlen(start);
-		msg_start = strstr(buf, start);
-	}
-	if (msg_start == NULL) {
-		return "";
-	}
-	msg_start += len;
-	if (end != NULL) {
-		msg_end = strstr(msg_start, end);
-		if (msg_end == NULL) {
-			return "";
+static void getAttrSdp(const map<string, string> &attr, _StrPrinter &printer){
+	const map<string, string>::value_type *ptr = nullptr;
+	for(auto &pr : attr){
+		if(pr.first == "control"){
+			ptr = &pr;
+			continue;
+		}
+		if(pr.second.empty()){
+			printer << "a=" << pr.first << "\r\n";
+		}else{
+			printer << "a=" << pr.first << ":" << pr.second << "\r\n";
 		}
 	}
-	return string(msg_start, msg_end);
+	if(ptr){
+		printer << "a=" << ptr->first << ":" << ptr->second << "\r\n";
+	}
 }
+string SdpTrack::toString() const {
+	_StrPrinter _printer;
+	switch (_type){
+		case TrackTitle:{
+			_printer << "v=" << 0 << "\r\n";
+			if(!_o.empty()){
+				_printer << "o="<< _o << "\r\n";
+			}
+			if(!_c.empty()){
+				_printer << "c=" << _c << "\r\n";
+			}
+			if(!_t.empty()){
+				_printer << "t=" << _t << "\r\n";
+			}
 
-
-void SdpAttr::load(const string &sdp) {
+			_printer << "s=RTSP Session, streamed by the ZLMediaKit\r\n";
+			_printer << "i=ZLMediaKit Live Stream\r\n";
+			getAttrSdp(_attr,_printer);
+		}
+			break;
+		case TrackAudio:
+		case TrackVideo:{
+			if(_type == TrackAudio){
+				_printer << "m=audio 0 RTP/AVP " << _pt << "\r\n";
+			}else{
+				_printer << "m=video 0 RTP/AVP " << _pt << "\r\n";
+			}
+			if(!_b.empty()){
+				_printer << "b=" <<_b << "\r\n";
+			}
+			getAttrSdp(_attr,_printer);
+		}
+			break;
+		default:
+			break;
+	}
+	return _printer;
+}
+void SdpParser::load(const string &sdp) {
 	_track_map.clear();
 	string key;
 	SdpTrack::Ptr track = std::make_shared<SdpTrack>();
@@ -88,7 +120,7 @@ void SdpAttr::load(const string &sdp) {
 			case 'm':{
 				_track_map[key] = track;
 				track = std::make_shared<SdpTrack>();
-				key = FindField(opt_val.data(), nullptr," ");;
+				key = FindField(opt_val.data(), nullptr," ");
 				track->_m = opt_val;
 			}
 				break;
@@ -161,11 +193,11 @@ void SdpAttr::load(const string &sdp) {
 	}
 }
 
-bool SdpAttr::available() const {
+bool SdpParser::available() const {
     return getTrack(TrackAudio) || getTrack(TrackVideo);
 }
 
-SdpTrack::Ptr SdpAttr::getTrack(TrackType type) const {
+SdpTrack::Ptr SdpParser::getTrack(TrackType type) const {
 	for (auto &pr : _track_map){
 		if(pr.second->_type == type){
 			return pr.second;
@@ -174,7 +206,7 @@ SdpTrack::Ptr SdpAttr::getTrack(TrackType type) const {
 	return nullptr;
 }
 
-vector<SdpTrack::Ptr> SdpAttr::getAvailableTrack() const {
+vector<SdpTrack::Ptr> SdpParser::getAvailableTrack() const {
 	vector<SdpTrack::Ptr> ret;
 	auto video = getTrack(TrackVideo);
 	if(video){
@@ -185,6 +217,29 @@ vector<SdpTrack::Ptr> SdpAttr::getAvailableTrack() const {
 		ret.emplace_back(audio);
 	}
 	return ret;
+}
+
+string SdpParser::toString() const {
+	string title,audio,video;
+	for(auto &pr : _track_map){
+		switch (pr.second->_type){
+			case TrackTitle:{
+				title = pr.second->toString();
+			}
+				break;
+			case TrackVideo:{
+				video = pr.second->toString();
+			}
+				break;
+			case TrackAudio:{
+				audio = pr.second->toString();
+			}
+				break;
+			default:
+				break;
+		}
+	}
+	return title + video + audio;
 }
 
 }//namespace mediakit

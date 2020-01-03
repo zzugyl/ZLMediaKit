@@ -1,16 +1,29 @@
+![logo](https://raw.githubusercontent.com/zlmediakit/ZLMediaKit/master/logo.png)
+
+[english readme](https://github.com/xiongziliang/ZLMediaKit/blob/master/README_en.md)
+
 # 一个基于C++11的高性能运营级流媒体服务框架
  [![Build Status](https://travis-ci.org/xiongziliang/ZLMediaKit.svg?branch=master)](https://travis-ci.org/xiongziliang/ZLMediaKit)
 
+
+## 国内用户请使用gitee镜像下载
+```
+git clone --depth 1 https://gitee.com/xiahcu/ZLMediaKit
+cd ZLMediaKit
+git submodule update --init
+```
 ## 项目特点
 - 基于C++11开发，避免使用裸指针，代码稳定可靠；同时跨平台移植简单方便，代码清晰简洁。
-- 打包多种流媒体协议(RTSP/RTMP/HLS），支持协议间的互相转换，提供一站式的服务。
+- 打包多种流媒体协议(RTSP/RTMP/HLS/HTTP-FLV/Websocket-FLV），支持协议间的互相转换，提供一站式的服务。
 - 使用epoll+线程池+异步网络IO模式开发，并发性能优越。
 - 已实现主流的的H264/H265+AAC流媒体方案，代码精简,脉络清晰，适合学习。
-- 编码格式与框架代码解耦，方便自由简洁的添加支持其他编码格式
+- 编码格式与框架代码解耦，方便自由简洁的添加支持其他编码格式。
 - 代码经过大量的稳定性、性能测试，可满足商用服务器项目。
-- 支持linux、macos、ios、android、windows平台
-- 支持画面秒开(GOP缓存)、极低延时(1秒内)
-- [ZLMediaKit高并发实现原理](https://github.com/xiongziliang/ZLMediaKit/wiki/ZLMediaKit%E9%AB%98%E5%B9%B6%E5%8F%91%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86)
+- 支持linux、macos、ios、android、windows平台。
+- 支持画面秒开(GOP缓存)、极低延时([500毫秒内，最低可达100毫秒](https://github.com/zlmediakit/ZLMediaKit/wiki/%E5%BB%B6%E6%97%B6%E6%B5%8B%E8%AF%95))。
+- [ZLMediaKit高并发实现原理](https://github.com/xiongziliang/ZLMediaKit/wiki/ZLMediaKit%E9%AB%98%E5%B9%B6%E5%8F%91%E5%AE%9E%E7%8E%B0%E5%8E%9F%E7%90%86)。
+- 提供完善的标准[C API](https://github.com/xiongziliang/ZLMediaKit/tree/master/api/include),可以作SDK用，或供其他语言调用。
+- 提供完整的[MediaServer](https://github.com/xiongziliang/ZLMediaKit/tree/master/server)服务器，可以免开发直接部署为商用服务器。
 
 ## 项目定位
 - 移动嵌入式跨平台流媒体解决方案。
@@ -41,14 +54,16 @@
 
 - HLS
   - 支持HLS文件生成，自带HTTP文件服务器。
+  - 支持播放鉴权，鉴权结果可以缓存为cookie
 
 - HTTP[S]
   - 服务器支持`目录索引生成`,`文件下载`,`表单提交请求`。
   - 客户端提供`文件下载器(支持断点续传)`,`接口请求器`,`文件上传器`。
   - 完整HTTP API服务器，可以作为web后台开发框架。
   - 支持跨域访问。
-  - 客户端支持cookie
-  - 支持WebSocket服务器
+  - 支持http客户端、服务器cookie
+  - 支持WebSocket服务器和客户端
+  - 支持http文件访问鉴权
 
 - 其他
   - 支持输入YUV+PCM自动生成RTSP/RTMP/HLS/MP4.
@@ -58,7 +73,11 @@
   - 支持流量统计、推流播放鉴权等事件
   - 支持rtsp/rtmp/http虚拟主机
   - 支持flv、mp4文件录制
-  - 支持rtps/rtmp点播，支持seek
+  - 支持rtps/rtmp协议的mp4点播，支持seek
+  - 支持按需拉流，无人观看自动关断拉流
+  - 支持先拉流后推流，提高及时推流画面打开率
+  - 支持rtsp/rtmp/http-flv/hls播放鉴权(url参数方式)
+ 
 
 
 ## 其他功能细节表
@@ -69,9 +88,9 @@
     | :------------------------------: | :--: | :--: | :--: | :---: |
     | RTSP[S] --> RTMP/HTTP[S]-FLV/FLV |  Y   |  N   |  Y   |   N   |
     |         RTMP --> RTSP[S]         |  Y   |  N   |  Y   |   N   |
-    |         RTSP[S] --> HLS          |  Y   |  N   |  Y   |   N   |
+    |         RTSP[S] --> HLS          |  Y   |  Y   |  Y   |   N   |
     |           RTMP --> HLS           |  Y   |  N   |  Y   |   N   |
-    |         RTSP[S] --> MP4          |  Y   |  N   |  Y   |   N   |
+    |         RTSP[S] --> MP4          |  Y   |  Y   |  Y   |   N   |
     |           RTMP --> MP4           |  Y   |  N   |  Y   |   N   |
     |         MP4 --> RTSP[S]          |  Y   |  N   |  Y   |   N   |
     |           MP4 --> RTMP           |  Y   |  N   |  Y   |   N   |
@@ -81,9 +100,9 @@
   |          功能/编码格式             | H264 | H265 | AAC  | other |
   | :------------------------------: | :--: | :--: | :--: | :---: |
   | RTSP[S]推流 |  Y   |  Y  |  Y   |   Y   |
-  |         RTSP拉流代理         |  Y   |  Y  |  Y   |   N   |
+  |         RTSP拉流代理         |  Y   |  Y  |  Y   |   Y   |
   |   RTMP推流    |  Y   |  Y   |  Y   |   Y   |
-  | RTMP拉流代理  |  Y   |  N   |  Y   |   N   |
+  | RTMP拉流代理  |  Y   |  Y   |  Y   |   Y   |
 
 - RTP传输方式:
 
@@ -102,7 +121,7 @@
   | RTSP[S] Play Server |  Y   |
   | RTSP[S] Push Server |  Y   |
   |        RTMP         |  Y   |
-  |  HTTP[S]/WebSocket  |  Y   |
+  |  HTTP[S]/WebSocket[S]  |  Y   |
 
 - 支持的客户端类型
 
@@ -113,6 +132,7 @@
   | RTMP Player |  Y   |
   | RTMP Pusher |  Y   |
   |   HTTP[S]   |  Y   |
+  | WebSocket[S] |  Y  |
 
 ## 后续任务
 - 完善支持H265
@@ -120,6 +140,15 @@
 ## 编译要求
 - 编译器支持C++11，GCC4.8/Clang3.3/VC2015或以上
 - cmake3.2或以上
+
+## 编译前必看！！！
+
+- **必须使用git下载完整的代码，不要使用下载zip包的方式下载源码，否则子模块代码默认不下载！你可以像以下这样操作:**
+```
+git clone https://github.com/zlmediakit/ZLMediaKit.git
+cd ZLMediaKit
+git submodule update --init
+```
 
 ## 编译(Linux)
 - 我的编译环境
@@ -137,7 +166,6 @@
 	scl enable devtoolset-4 bash
 
 	2、安装cmake
-	cd third/
 	#需要安装新版本cmake,当然你也可以通过yum或者apt-get方式安装(前提是版本够新)
 	tar -xvf cmake-3.10.0-rc4.tar.gz
 	cd cmake-3.10.0-rc4
@@ -173,14 +201,14 @@
   cd ZLMediaKit
   ./build_for_ios.sh
   ```
-- 你也可以生成Xcode工程再编译：
+- 你也可以生成Xcode工程再编译,[了解更多](https://github.com/leetal/ios-cmake):
 
   ```
   cd ZLMediaKit
   mkdir -p build
   cd build
   # 生成Xcode工程，工程文件在build目录下
-  cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/iOS.cmake -DIOS_PLATFORM=SIMULATOR64 -G "Xcode"
+  cmake .. -G Xcode -DCMAKE_TOOLCHAIN_FILE=../cmake/ios.toolchain.cmake  -DPLATFORM=OS64COMBINED
   ```
   
 ## 编译(Android)
@@ -212,7 +240,7 @@
 ```
 ## 使用方法
 - 作为服务器：
-	```
+	```cpp
 	TcpServer::Ptr rtspSrv(new TcpServer());
 	TcpServer::Ptr rtmpSrv(new TcpServer());
 	TcpServer::Ptr httpSrv(new TcpServer());
@@ -222,11 +250,10 @@
 	rtmpSrv->start<RtmpSession>(mINI::Instance()[Config::Rtmp::kPort]);
 	httpSrv->start<HttpSession>(mINI::Instance()[Config::Http::kPort]);
 	httpsSrv->start<HttpsSession>(mINI::Instance()[Config::Http::kSSLPort]);
-	EventPoller::Instance().runLoop();
 	```
 
 - 作为播放器：
-	```
+	```cpp
     MediaPlayer::Ptr player(new MediaPlayer());
     weak_ptr<MediaPlayer> weakPlayer = player;
     player->setOnPlayResult([weakPlayer](const SockException &ex) {
@@ -251,11 +278,11 @@
     });
 
     //支持rtmp、rtsp
-    (*player)[RtspPlayer::kRtpType] = PlayerBase::RTP_TCP;
+    (*player)[Client::kRtpType] = Rtsp::RTP_TCP;
     player->play("rtsp://admin:jzan123456@192.168.0.122/");
 	```
 - 作为代理服务器：
-	```
+	```cpp
 	//support rtmp and rtsp url
 	//just support H264+AAC
 	auto urlList = {"rtmp://live.hkstv.hk.lxdns.com/live/hks",
@@ -279,7 +306,7 @@
 	```
 	
 - 作为推流客户端器：
-	```
+	```cpp
 	PlayerProxy::Ptr player(new PlayerProxy("app","stream"));
 	//拉一个流，生成一个RtmpMediaSource，源的名称是"app/stream"
 	//你也可以以其他方式生成RtmpMediaSource，比如说MP4文件（请研读MediaReader代码）
@@ -297,7 +324,6 @@
 		pusher->publish("rtmp://jizan.iok.la/live/test");
 	});
 
-	EventPoller::Instance().runLoop();
 	```
 ## QA
 - 怎么测试服务器性能？
@@ -336,11 +362,18 @@
 由于使用本项目而产生的商业纠纷或侵权行为一概与本项项目及开发者无关，请自行承担法律风险。
 
 ## 联系方式
- - 邮箱：<771730766@qq.com>
+ - 邮箱：<771730766@qq.com>(本项目相关或流媒体相关问题请走issue流程，否则恕不邮件答复)
  - QQ群：542509000
+ 
+## 怎么提问？
+如果要对项目有相关疑问，建议您这么做：
+ - 1、仔细看下readme、wiki，如果有必要可以查看下issue.
+ - 2、如果您的问题还没解决，可以提issue.
+ - 3、有些问题，如果不具备参考性的，无需在issue提的，可以在qq群提.
+ - 4、QQ私聊一般不接受无偿技术咨询和支持(谈谈人生理想还是可以的😂)，毕竟精力有限，谢谢理解.
 
 ## 捐赠
-如果本项目能切实帮助您减少重复开发的工作量，您可以在自愿的基础上支持下作者，谢谢！
+欢迎捐赠以便更好的推动项目的发展，谢谢您的支持!
 
 [支付宝](https://raw.githubusercontent.com/xiongziliang/other/master/IMG_3919.JPG)
 
