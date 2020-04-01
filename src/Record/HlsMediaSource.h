@@ -1,4 +1,4 @@
-/*
+﻿/*
  * MIT License
  *
  * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
@@ -44,16 +44,16 @@ public:
     virtual ~HlsMediaSource() = default;
 
     /**
-	 * 	获取媒体源的环形缓冲
-	 */
+     * 	获取媒体源的环形缓冲
+     */
     const RingType::Ptr &getRing() const {
         return _ring;
     }
 
     /**
-	 * 获取播放器个数
-	 * @return
-	 */
+     * 获取播放器个数
+     * @return
+     */
     int readerCount() override {
         return _readerCount.load();
     }
@@ -79,7 +79,7 @@ private:
             return;
         }
 
-        if (--_readerCount == 0 && totalReaderCount() == 0) {
+        if (--_readerCount == 0) {
             onNoneReader();
         }
     }
@@ -92,7 +92,7 @@ private:
 class HlsCookieData{
 public:
     typedef std::shared_ptr<HlsCookieData> Ptr;
-    HlsCookieData(const MediaInfo &info);
+    HlsCookieData(const MediaInfo &info, const string &sessionIdentifier, const string &peer_ip, uint16_t peer_port);
     ~HlsCookieData();
     void addByteUsage(uint64_t bytes);
 private:
@@ -100,6 +100,9 @@ private:
 private:
     uint64_t _bytes = 0;
     MediaInfo _info;
+    string _sessionIdentifier;
+    string _peer_ip;
+    uint16_t _peer_port;
     std::shared_ptr<bool> _added;
     weak_ptr<HlsMediaSource> _src;
     Ticker _ticker;

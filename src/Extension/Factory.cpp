@@ -88,8 +88,7 @@ Track::Ptr Factory::getTrackBySdp(const SdpTrack::Ptr &track) {
         return std::make_shared<H265Track>(vps,sps,pps,0,0,0);
     }
 
-
-    WarnL << "暂不支持该sdp:" << track->_codec << " " << track->_fmtp;
+    WarnL << "暂不支持该sdp:" << track->getName();
     return nullptr;
 }
 
@@ -155,7 +154,7 @@ RtpCodec::Ptr Factory::getRtpDecoderByTrack(const Track::Ptr &track) {
         case CodecAAC:
             return std::make_shared<AACRtpDecoder>(track->clone());
         default:
-            WarnL << "暂不支持该CodecId:" << track->getCodecId();
+            WarnL << "暂不支持该CodecId:" << track->getCodecName();
             return nullptr;
     }
 }
@@ -212,7 +211,7 @@ RtmpCodec::Ptr Factory::getRtmpCodecByTrack(const Track::Ptr &track) {
         case CodecAAC:
             return std::make_shared<AACRtmpEncoder>(track);
         default:
-            WarnL << "暂不支持该CodecId:" << track->getCodecId();
+            WarnL << "暂不支持该CodecId:" << track->getCodecName();
             return nullptr;
     }
 }

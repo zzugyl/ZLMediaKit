@@ -66,23 +66,29 @@ private:
         _pRtmpMediaSrc = dynamic_pointer_cast<RtmpMediaSource>(_pMediaSrc);
         if(_pRtmpMediaSrc){
             _pRtmpMediaSrc->setMetaData(val);
+            _set_meta_data = true;
         }
         _delegate.reset(new RtmpDemuxer);
         _delegate->loadMetaData(val);
         return true;
     }
     void onMediaData(const RtmpPacket::Ptr &chunkData) override {
-    	if(_pRtmpMediaSrc){
+        if(_pRtmpMediaSrc){
+            if(!_set_meta_data && !chunkData->isCfgFrame()){
+                _set_meta_data = true;
+                _pRtmpMediaSrc->setMetaData(TitleMeta().getMetadata());
+            }
             _pRtmpMediaSrc->onWrite(chunkData);
         }
         if(!_delegate){
-    	    //这个流没有metadata
+            //这个流没有metadata
             _delegate.reset(new RtmpDemuxer());
         }
         _delegate->inputRtmp(chunkData);
     }
 private:
     RtmpMediaSource::Ptr _pRtmpMediaSrc;
+    bool _set_meta_data = false;
 };
 
 

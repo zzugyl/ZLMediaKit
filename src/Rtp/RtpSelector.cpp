@@ -32,12 +32,8 @@ namespace mediakit{
 INSTANCE_IMP(RtpSelector);
 
 bool RtpSelector::inputRtp(const char *data, int data_len,const struct sockaddr *addr,uint32_t *dts_out) {
-    if(_last_rtp_time.elapsedTime() > 3000){
-        _last_rtp_time.resetTime();
-        onManager();
-    }
-    auto ssrc = getSSRC(data,data_len);
-    if(!ssrc){
+    uint32_t ssrc = 0;
+    if(!getSSRC(data,data_len,ssrc)){
         WarnL << "get ssrc from rtp failed:" << data_len;
         return false;
     }
@@ -48,12 +44,13 @@ bool RtpSelector::inputRtp(const char *data, int data_len,const struct sockaddr 
     return false;
 }
 
-uint32_t RtpSelector::getSSRC(const char *data, int data_len) {
+bool RtpSelector::getSSRC(const char *data,int data_len, uint32_t &ssrc){
     if(data_len < 12){
-        return 0;
+        return false;
     }
     uint32_t *ssrc_ptr = (uint32_t *)(data + 8);
-    return ntohl(*ssrc_ptr);
+    ssrc = ntohl(*ssrc_ptr);
+    return true;
 }
 
 RtpProcess::Ptr RtpSelector::getProcess(uint32_t ssrc,bool makeNew) {
@@ -62,11 +59,28 @@ RtpProcess::Ptr RtpSelector::getProcess(uint32_t ssrc,bool makeNew) {
     if(it == _map_rtp_process.end() && !makeNew){
         return nullptr;
     }
-    RtpProcess::Ptr &ref = _map_rtp_process[ssrc];
+    RtpProcessHelper::Ptr &ref = _map_rtp_process[ssrc];
     if(!ref){
-        ref = std::make_shared<RtpProcess>(ssrc);
+        ref = std::make_shared<RtpProcessHelper>(ssrc,shared_from_this());
+        ref->attachEvent();
+        createTimer();
     }
-    return ref;
+    return ref->getProcess();
+}
+
+void RtpSelector::createTimer() {
+    if (!_timer) {
+        //创建超时管理定时器
+        weak_ptr<RtpSelector> weakSelf = shared_from_this();
+        _timer = std::make_shared<Timer>(3.0, [weakSelf] {
+            auto strongSelf = weakSelf.lock();
+            if (!strongSelf) {
+                return false;
+            }
+            strongSelf->onManager();
+            return true;
+        }, EventPollerPool::Instance().getPoller());
+    }
 }
 
 void RtpSelector::delProcess(uint32_t ssrc,const RtpProcess *ptr) {
@@ -76,7 +90,7 @@ void RtpSelector::delProcess(uint32_t ssrc,const RtpProcess *ptr) {
         return;
     }
 
-    if(it->second.get() != ptr){
+    if(it->second->getProcess().get() != ptr){
         return;
     }
 
@@ -86,7 +100,7 @@ void RtpSelector::delProcess(uint32_t ssrc,const RtpProcess *ptr) {
 void RtpSelector::onManager() {
     lock_guard<decltype(_mtx_map)> lck(_mtx_map);
     for (auto it = _map_rtp_process.begin(); it != _map_rtp_process.end();) {
-        if (it->second->alive()) {
+        if (it->second->getProcess()->alive()) {
             ++it;
             continue;
         }
@@ -99,6 +113,41 @@ RtpSelector::RtpSelector() {
 }
 
 RtpSelector::~RtpSelector() {
+}
+
+RtpProcessHelper::RtpProcessHelper(uint32_t ssrc, const weak_ptr<RtpSelector> &parent) {
+    _ssrc = ssrc;
+    _parent = parent;
+    _process = std::make_shared<RtpProcess>(_ssrc);
+}
+
+RtpProcessHelper::~RtpProcessHelper() {
+}
+
+void RtpProcessHelper::attachEvent() {
+    _process->setListener(shared_from_this());
+}
+
+bool RtpProcessHelper::close(MediaSource &sender, bool force) {
+    //此回调在其他线程触发
+    if(!_process || (!force && _process->totalReaderCount())){
+        return false;
+    }
+    auto parent = _parent.lock();
+    if(!parent){
+        return false;
+    }
+    parent->delProcess(_ssrc,_process.get());
+    WarnL << "close media:" << sender.getSchema() << "/" << sender.getVhost() << "/" << sender.getApp() << "/" << sender.getId() << " " << force;
+    return true;
+}
+
+int RtpProcessHelper::totalReaderCount(MediaSource &sender) {
+    return _process ? _process->totalReaderCount() : sender.totalReaderCount();
+}
+
+RtpProcess::Ptr &RtpProcessHelper::getProcess() {
+    return _process;
 }
 
 }//namespace mediakit

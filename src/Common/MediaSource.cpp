@@ -78,14 +78,7 @@ vector<Track::Ptr> MediaSource::getTracks(bool trackReady) const {
 
 void MediaSource::setTrackSource(const std::weak_ptr<TrackSource> &track_src) {
     _track_source = track_src;
-    weak_ptr<MediaSource> weakPtr = shared_from_this();
-    EventPollerPool::Instance().getPoller()->async([weakPtr,this](){
-        auto strongPtr = weakPtr.lock();
-        if (!strongPtr) {
-            return;
-        }
-        NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastMediaResetTracks, *this);
-    },false);
+    NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastMediaResetTracks, *this);
 }
 
 void MediaSource::setListener(const std::weak_ptr<MediaSourceEvent> &listener){
@@ -124,7 +117,9 @@ void MediaSource::onNoneReader(){
     if(!listener){
         return;
     }
-    listener->onNoneReader(*this);
+    if (listener->totalReaderCount(*this) == 0) {
+        listener->onNoneReader(*this);
+    }
 }
 
 void MediaSource::for_each_media(const function<void(const MediaSource::Ptr &src)> &cb) {
@@ -260,22 +255,25 @@ MediaSource::Ptr MediaSource::find(const string &schema, const string &vhost_tmp
         vhost = DEFAULT_VHOST;
     }
 
-    lock_guard<recursive_mutex> lock(g_mtxMediaSrc);
     MediaSource::Ptr ret;
-	//查找某一媒体源，找到后返回
-    searchMedia(g_mapMediaSrc, schema, vhost, app, id, [&](SchemaVhostAppStreamMap::iterator &it0,
-                                                           VhostAppStreamMap::iterator &it1,
-                                                           AppStreamMap::iterator &it2,
-                                                           StreamMap::iterator &it3) {
-        ret = it3->second.lock();
-        if (!ret) {
-            //该对象已经销毁
-            it2->second.erase(it3);
-            eraseIfEmpty(g_mapMediaSrc,it0, it1, it2);
-            return false;
-        }
-        return true;
-    });
+    {
+        lock_guard<recursive_mutex> lock(g_mtxMediaSrc);
+        //查找某一媒体源，找到后返回
+        searchMedia(g_mapMediaSrc, schema, vhost, app, id, [&](SchemaVhostAppStreamMap::iterator &it0,
+                                                               VhostAppStreamMap::iterator &it1,
+                                                               AppStreamMap::iterator &it2,
+                                                               StreamMap::iterator &it3) {
+            ret = it3->second.lock();
+            if (!ret) {
+                //该对象已经销毁
+                it2->second.erase(it3);
+                eraseIfEmpty(g_mapMediaSrc, it0, it1, it2);
+                return false;
+            }
+            return true;
+        });
+    }
+
     if(!ret && bMake){
         //未查找媒体源，则创建一个
         ret = MP4Reader::onMakeMediaSource(schema, vhost,app,id);
@@ -293,38 +291,36 @@ void MediaSource::regist() {
         g_mapMediaSrc[_strSchema][_strVhost][_strApp][_strId] =  shared_from_this();
     }
     InfoL << _strSchema << " " << _strVhost << " " << _strApp << " " << _strId;
-    weak_ptr<MediaSource> weakPtr = shared_from_this();
-    EventPollerPool::Instance().getPoller()->async([weakPtr,this](){
-        auto strongPtr = weakPtr.lock();
-        if (!strongPtr) {
-            return;
-        }
-        NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastMediaChanged, true, *this);
-    },false);
-}
-bool MediaSource::unregist() {
-    //反注册该源
-    lock_guard<recursive_mutex> lock(g_mtxMediaSrc);
-    return searchMedia(g_mapMediaSrc, _strSchema, _strVhost, _strApp, _strId,[&](SchemaVhostAppStreamMap::iterator &it0,
-                                                                                 VhostAppStreamMap::iterator &it1,
-                                                                                 AppStreamMap::iterator &it2,
-                                                                                 StreamMap::iterator &it3) {
-        auto strongMedia = it3->second.lock();
-        if (strongMedia && this != strongMedia.get()) {
-            //不是自己,不允许反注册
-            return false;
-        }
-        it2->second.erase(it3);
-        eraseIfEmpty(g_mapMediaSrc, it0, it1, it2);
-        unregisted();
-        return true;
-    });
-}
-void MediaSource::unregisted(){
-    InfoL <<  "" <<  _strSchema << " " << _strVhost << " " << _strApp << " " << _strId;
-    NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastMediaChanged, false, *this);
+    NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastMediaChanged, true, *this);
 }
 
+//反注册该源
+bool MediaSource::unregist() {
+    bool ret;
+    {
+        lock_guard<recursive_mutex> lock(g_mtxMediaSrc);
+        ret = searchMedia(g_mapMediaSrc, _strSchema, _strVhost, _strApp, _strId,
+                          [&](SchemaVhostAppStreamMap::iterator &it0,
+                              VhostAppStreamMap::iterator &it1,
+                              AppStreamMap::iterator &it2,
+                              StreamMap::iterator &it3) {
+                              auto strongMedia = it3->second.lock();
+                              if (strongMedia && this != strongMedia.get()) {
+                                  //不是自己,不允许反注册
+                                  return false;
+                              }
+                              it2->second.erase(it3);
+                              eraseIfEmpty(g_mapMediaSrc, it0, it1, it2);
+                              return true;
+                          });
+    }
+
+    if(ret){
+        InfoL <<  "" <<  _strSchema << " " << _strVhost << " " << _strApp << " " << _strId;
+        NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastMediaChanged, false, *this);
+    }
+    return ret;
+}
 
 /////////////////////////////////////MediaInfo//////////////////////////////////////
 
@@ -346,6 +342,12 @@ void MediaInfo::parse(const string &url){
         } else{
             _host = _vhost = vhost;
         }
+
+        if(_vhost == "localhost" || INADDR_NONE != inet_addr(_vhost.data())){
+            //如果访问的是localhost或ip，那么则为默认虚拟主机
+            _vhost = DEFAULT_VHOST;
+        }
+
     }
     if(split_vec.size() > 1){
         _app = split_vec[1];
@@ -372,7 +374,8 @@ void MediaInfo::parse(const string &url){
     }
 
     GET_CONFIG(bool,enableVhost,General::kEnableVhost);
-    if(!enableVhost || _vhost.empty() || _vhost == "localhost" || INADDR_NONE != inet_addr(_vhost.data())){
+    if(!enableVhost || _vhost.empty()){
+        //如果关闭虚拟主机或者虚拟主机为空，则设置虚拟主机为默认
         _vhost = DEFAULT_VHOST;
     }
 }
@@ -381,16 +384,31 @@ void MediaInfo::parse(const string &url){
 
 void MediaSourceEvent::onNoneReader(MediaSource &sender){
     //没有任何读取器消费该源，表明该源可以关闭了
-    WarnL << sender.getSchema() << "/" << sender.getVhost() << "/" << sender.getApp() << "/" << sender.getId();
-    weak_ptr<MediaSource> weakPtr = sender.shared_from_this();
+    GET_CONFIG(int, stream_none_reader_delay, General::kStreamNoneReaderDelayMS);
 
-    //异步广播该事件，防止同步调用sender.close()导致在接收rtp或rtmp包时清空包缓存等操作
-    EventPollerPool::Instance().getPoller()->async([weakPtr](){
-        auto strongPtr = weakPtr.lock();
-        if(strongPtr){
-            NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastStreamNoneReader,*strongPtr);
+    weak_ptr<MediaSource> weakSender = sender.shared_from_this();
+    _async_close_timer = std::make_shared<Timer>(stream_none_reader_delay / 1000.0, [weakSender]() {
+        auto strongSender = weakSender.lock();
+        if (!strongSender) {
+            //对象已经销毁
+            return false;
         }
-    },false);
+
+        if (strongSender->totalReaderCount() != 0) {
+            //还有人消费
+            return false;
+        }
+
+        WarnL << "onNoneReader:"
+              << strongSender->getSchema() << "/"
+              << strongSender->getVhost() << "/"
+              << strongSender->getApp() << "/"
+              << strongSender->getId();
+
+        //触发消息广播
+        NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastStreamNoneReader, *strongSender);
+        return false;
+    }, nullptr);
 }
 
 

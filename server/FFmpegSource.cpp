@@ -32,13 +32,22 @@
 
 namespace FFmpeg {
 #define FFmpeg_FIELD "ffmpeg."
-const char kBin[] = FFmpeg_FIELD"bin";
-const char kCmd[] = FFmpeg_FIELD"cmd";
-const char kLog[] = FFmpeg_FIELD"log";
+const string kBin = FFmpeg_FIELD"bin";
+const string kCmd = FFmpeg_FIELD"cmd";
+const string kLog = FFmpeg_FIELD"log";
 
 onceToken token([]() {
-    mINI::Instance()[kBin] = trim(System::execute("which ffmpeg"));
-    mINI::Instance()[kCmd] = "%s -re -i %s -c:a aac -strict -2 -ar 44100 -ab 48k -c:v libx264 -f flv %s";
+#ifdef _WIN32
+    string ffmpeg_bin = System::execute("where ffmpeg");
+    //windows下先关闭FFmpeg日志(目前不支持日志重定向)
+    mINI::Instance()[kCmd] = "%s -re -i \"%s\" -loglevel quiet -c:a aac -strict -2 -ar 44100 -ab 48k -c:v libx264 -f flv %s ";
+#else
+    string ffmpeg_bin = System::execute("which ffmpeg");
+    mINI::Instance()[kCmd] = "%s -re -i \"%s\" -c:a aac -strict -2 -ar 44100 -ab 48k -c:v libx264 -f flv %s ";
+#endif
+    //默认ffmpeg命令路径为环境变量中路径
+    mINI::Instance()[kBin] = ffmpeg_bin.empty() ? "ffmpeg" : ffmpeg_bin;
+    //ffmpeg日志保存路径
     mINI::Instance()[kLog] = "./ffmpeg/ffmpeg.log";
 });
 }
@@ -63,7 +72,7 @@ void FFmpegSource::play(const string &src_url,const string &dst_url,int timeout_
 
     char cmd[1024] = {0};
     snprintf(cmd, sizeof(cmd),ffmpeg_cmd.data(),ffmpeg_bin.data(),src_url.data(),dst_url.data());
-    _process.run(cmd,File::absolutePath("",ffmpeg_log));
+    _process.run(cmd,ffmpeg_log.empty() ? "" : File::absolutePath("",ffmpeg_log));
     InfoL << cmd;
 
     if(_media_info._host == "127.0.0.1"){
@@ -227,21 +236,12 @@ bool FFmpegSource::close(MediaSource &sender, bool force) {
     return true;
 }
 
-void FFmpegSource::onNoneReader(MediaSource &sender) {
-    auto listener = _listener.lock();
-    if(listener){
-        listener->onNoneReader(sender);
-    }else{
-        MediaSourceEvent::onNoneReader(sender);
-    }
-}
-
 int FFmpegSource::totalReaderCount(MediaSource &sender) {
     auto listener = _listener.lock();
     if(listener){
         return listener->totalReaderCount(sender);
     }
-    return 0;
+    return sender.readerCount();
 }
 
 void FFmpegSource::onGetMediaSource(const MediaSource::Ptr &src) {

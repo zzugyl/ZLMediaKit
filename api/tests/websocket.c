@@ -172,7 +172,7 @@ void test_server(){
     };
 
     mk_tcp_server_events_listen(&events_server);
-    mk_tcp_server_server_start(80,TCP_TYPE);
+    mk_tcp_server_start(80, TCP_TYPE);
 }
 
 void test_client(){
@@ -195,8 +195,8 @@ void test_client(){
 }
 
 int main(int argc, char *argv[]) {
-    char *ini_path = mk_uitl_get_exe_dir("c_api.ini");
-    char *ssl_path = mk_uitl_get_exe_dir("ssl.p12");
+    char *ini_path = mk_util_get_exe_dir("c_api.ini");
+    char *ssl_path = mk_util_get_exe_dir("ssl.p12");
 
     mk_config config = {
             .ini = ini_path,
