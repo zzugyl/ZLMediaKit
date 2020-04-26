@@ -1,27 +1,11 @@
 ﻿/*
- * MIT License
- *
- * Copyright (c) 2019 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
 
 #ifndef MK_MEDIA_H_
@@ -41,11 +25,14 @@ typedef void *mk_media;
  * @param app 应用名，推荐为live
  * @param stream 流id，例如camera
  * @param duration 时长(单位秒)，直播则为0
+ * @param rtsp_enabled 是否启用rtsp协议
+ * @param rtmp_enabled 是否启用rtmp协议
  * @param hls_enabled 是否生成hls
  * @param mp4_enabled 是否生成mp4
  * @return 对象指针
  */
-API_EXPORT mk_media API_CALL mk_media_create(const char *vhost, const char *app, const char *stream, float duration, int hls_enabled, int mp4_enabled);
+API_EXPORT mk_media API_CALL mk_media_create(const char *vhost, const char *app, const char *stream, float duration,
+                                             int rtsp_enabled, int rtmp_enabled, int hls_enabled, int mp4_enabled);
 
 /**
  * 销毁媒体源
@@ -54,32 +41,24 @@ API_EXPORT mk_media API_CALL mk_media_create(const char *vhost, const char *app,
 API_EXPORT void API_CALL mk_media_release(mk_media ctx);
 
 /**
- * 添加h264视频轨道
+ * 添加视频轨道
  * @param ctx 对象指针
+ * @param track_id  0:CodecH264/1:CodecH265
  * @param width 视频宽度
  * @param height 视频高度
  * @param fps 视频fps
  */
-API_EXPORT void API_CALL mk_media_init_h264(mk_media ctx, int width, int height, int fps);
+API_EXPORT void API_CALL mk_media_init_video(mk_media ctx, int track_id, int width, int height, int fps);
 
 /**
- * 添加h265视频轨道
+ * 添加音频轨道
  * @param ctx 对象指针
- * @param width 视频宽度
- * @param height 视频高度
- * @param fps 视频fps
- */
-API_EXPORT void API_CALL mk_media_init_h265(mk_media ctx, int width, int height, int fps);
-
-/**
- * 添加aac音频轨道
- * @param ctx 对象指针
+ * @param track_id  2:CodecAAC/3:CodecG711A/4:CodecG711U
  * @param channel 通道数
  * @param sample_bit 采样位数，只支持16
  * @param sample_rate 采样率
- * @param profile aac编码profile，在不输入adts头时用于生产adts头
  */
-API_EXPORT void API_CALL mk_media_init_aac(mk_media ctx, int channel, int sample_bit, int sample_rate, int profile);
+API_EXPORT void API_CALL mk_media_init_audio(mk_media ctx, int track_id, int sample_rate, int channels, int sample_bit);
 
 /**
  * 初始化h264/h265/aac完毕后调用此函数，
@@ -110,16 +89,6 @@ API_EXPORT void API_CALL mk_media_input_h264(mk_media ctx, void *data, int len, 
 API_EXPORT void API_CALL mk_media_input_h265(mk_media ctx, void *data, int len, uint32_t dts, uint32_t pts);
 
 /**
- * 输入单帧AAC音频
- * @param ctx 对象指针
- * @param data 单帧AAC数据
- * @param len 单帧AAC数据字节数
- * @param dts 时间戳，毫秒
- * @param with_adts_header data中是否包含7个字节的adts头
- */
-API_EXPORT void API_CALL mk_media_input_aac(mk_media ctx, void *data, int len, uint32_t dts, int with_adts_header);
-
-/**
  * 输入单帧AAC音频(单独指定adts头)
  * @param ctx 对象指针
  * @param data 不包含adts头的单帧AAC数据
@@ -127,7 +96,16 @@ API_EXPORT void API_CALL mk_media_input_aac(mk_media ctx, void *data, int len, u
  * @param dts 时间戳，毫秒
  * @param adts adts头
  */
-API_EXPORT void API_CALL mk_media_input_aac1(mk_media ctx, void *data, int len, uint32_t dts, void *adts);
+API_EXPORT void API_CALL mk_media_input_aac(mk_media ctx, void *data, int len, uint32_t dts, void *adts);
+
+/**
+ * 输入单帧G711音频
+ * @param ctx 对象指针
+ * @param data 单帧G711数据
+ * @param len 单帧G711数据字节数
+ * @param dts 时间戳，毫秒
+ */
+API_EXPORT void API_CALL mk_media_input_g711(mk_media ctx, void* data, int len, uint32_t dts);
 
 /**
  * MediaSource.close()回调事件
@@ -147,6 +125,22 @@ typedef void(API_CALL *on_mk_media_close)(void *user_data);
  * @param user_data 用户数据指针
  */
 API_EXPORT void API_CALL mk_media_set_on_close(mk_media ctx, on_mk_media_close cb, void *user_data);
+
+/**
+ * 收到客户端的seek请求时触发该回调
+ * @param user_data 用户数据指针,通过mk_media_set_on_seek设置
+ * @param stamp_ms seek至的时间轴位置，单位毫秒
+ * @return 1代表将处理seek请求，0代表忽略该请求
+ */
+typedef int(API_CALL *on_mk_media_seek)(void *user_data,uint32_t stamp_ms);
+
+/**
+ * 监听播放器seek请求事件
+ * @param ctx 对象指针
+ * @param cb 回调指针
+ * @param user_data 用户数据指针
+ */
+API_EXPORT void API_CALL mk_media_set_on_seek(mk_media ctx, on_mk_media_seek cb, void *user_data);
 
 /**
  * 获取总的观看人数

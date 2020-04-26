@@ -1,27 +1,11 @@
 ﻿/*
- * MIT License
- *
- * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
 
 #include <stdlib.h>
@@ -32,7 +16,7 @@ namespace mediakit{
 
 int RtpPayload::getClockRate(int pt){
     switch (pt){
-#define SWITCH_CASE(name, type, value, clock_rate, channel) case value :  return clock_rate;
+#define SWITCH_CASE(name, type, value, clock_rate, channel, codec_id) case value :  return clock_rate;
         RTP_PT_MAP(SWITCH_CASE)
 #undef SWITCH_CASE
         default: return 90000;
@@ -41,7 +25,7 @@ int RtpPayload::getClockRate(int pt){
 
 TrackType RtpPayload::getTrackType(int pt){
     switch (pt){
-#define SWITCH_CASE(name, type, value, clock_rate, channel) case value :  return type;
+#define SWITCH_CASE(name, type, value, clock_rate, channel, codec_id) case value :  return type;
         RTP_PT_MAP(SWITCH_CASE)
 #undef SWITCH_CASE
         default: return TrackInvalid;
@@ -50,7 +34,7 @@ TrackType RtpPayload::getTrackType(int pt){
 
 int RtpPayload::getAudioChannel(int pt){
     switch (pt){
-#define SWITCH_CASE(name, type, value, clock_rate, channel) case value :  return channel;
+#define SWITCH_CASE(name, type, value, clock_rate, channel, codec_id) case value :  return channel;
         RTP_PT_MAP(SWITCH_CASE)
 #undef SWITCH_CASE
         default: return 1;
@@ -59,10 +43,19 @@ int RtpPayload::getAudioChannel(int pt){
 
 const char * RtpPayload::getName(int pt){
     switch (pt){
-#define SWITCH_CASE(name, type, value, clock_rate, channel) case value :  return #name;
+#define SWITCH_CASE(name, type, value, clock_rate, channel, codec_id) case value :  return #name;
         RTP_PT_MAP(SWITCH_CASE)
 #undef SWITCH_CASE
         default: return "unknown payload type";
+    }
+}
+
+CodecId RtpPayload::getCodecId(int pt) {
+    switch (pt) {
+#define SWITCH_CASE(name, type, value, clock_rate, channel, codec_id) case value :  return codec_id;
+        RTP_PT_MAP(SWITCH_CASE)
+#undef SWITCH_CASE
+        default : return CodecInvalid;
     }
 }
 
@@ -86,7 +79,7 @@ static void getAttrSdp(const map<string, string> &attr, _StrPrinter &printer){
 
 string SdpTrack::getName() const{
     switch (_pt){
-#define SWITCH_CASE(name, type, value, clock_rate, channel) case value :  return #name;
+#define SWITCH_CASE(name, type, value, clock_rate, channel, codec_id) case value :  return #name;
         RTP_PT_MAP(SWITCH_CASE)
 #undef SWITCH_CASE
         default: return _codec;
@@ -108,8 +101,7 @@ string SdpTrack::toString() const {
                 _printer << "t=" << _t << "\r\n";
             }
 
-            _printer << "s=RTSP Session, streamed by the ZLMediaKit\r\n";
-            _printer << "i=ZLMediaKit Live Stream\r\n";
+            _printer << "s=Streamed by " << SERVER_NAME << "\r\n";
             getAttrSdp(_attr,_printer);
         }
             break;
@@ -189,6 +181,7 @@ void SdpParser::load(const string &sdp) {
                     if (4 == sscanf(opt_val.data(), " %15[^ ] %d %15[^ ] %d", type, &port, rtp, &pt)) {
                         track->_pt = pt;
                         track->_samplerate = RtpPayload::getClockRate(pt) ;
+                        track->_channel = RtpPayload::getAudioChannel(pt);
                         track->_type = toTrackType(type);
                         track->_m = opt_val;
                         track->_port = port;
@@ -231,9 +224,14 @@ void SdpParser::load(const string &sdp) {
         it = track._attr.find("rtpmap");
         if(it != track._attr.end()){
             auto rtpmap = it->second;
-            int pt, samplerate;
+            int pt, samplerate, channel;
             char codec[16] = {0};
-            if (3 == sscanf(rtpmap.data(), "%d %15[^/]/%d", &pt, codec, &samplerate)) {
+            if (4 == sscanf(rtpmap.data(), "%d %15[^/]/%d/%d", &pt, codec, &samplerate, &channel)) {
+                track._pt = pt;
+                track._codec = codec;
+                track._samplerate = samplerate;
+                track._channel = channel;
+            }else if (3 == sscanf(rtpmap.data(), "%d %15[^/]/%d", &pt, codec, &samplerate)) {
                 track._pt = pt;
                 track._codec = codec;
                 track._samplerate = samplerate;

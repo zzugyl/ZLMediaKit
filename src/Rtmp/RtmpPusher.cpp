@@ -1,28 +1,13 @@
 ﻿/*
- * MIT License
- *
- * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
+
 #include "RtmpPusher.h"
 #include "Rtmp/utils.h"
 #include "Util/util.h"
@@ -215,12 +200,21 @@ inline void RtmpPusher::send_metaData(){
     
     _pRtmpReader = src->getRing()->attach(getPoller());
     weak_ptr<RtmpPusher> weakSelf = dynamic_pointer_cast<RtmpPusher>(shared_from_this());
-    _pRtmpReader->setReadCB([weakSelf](const RtmpPacket::Ptr &pkt){
+    _pRtmpReader->setReadCB([weakSelf](const RtmpMediaSource::RingDataType &pkt){
         auto strongSelf = weakSelf.lock();
         if(!strongSelf) {
             return;
         }
-        strongSelf->sendRtmp(pkt->typeId, strongSelf->_ui32StreamId, pkt, pkt->timeStamp, pkt->chunkId);
+
+        int i = 0;
+        int size = pkt->size();
+        strongSelf->setSendFlushFlag(false);
+        pkt->for_each([&](const RtmpPacket::Ptr &rtmp){
+            if(++i == size){
+                strongSelf->setSendFlushFlag(true);
+            }
+            strongSelf->sendRtmp(rtmp->typeId, strongSelf->_ui32StreamId, rtmp, rtmp->timeStamp, rtmp->chunkId);
+        });
     });
     _pRtmpReader->setDetachCB([weakSelf](){
         auto strongSelf = weakSelf.lock();
@@ -237,7 +231,7 @@ void RtmpPusher::setSocketFlags(){
     GET_CONFIG(bool,ultraLowDelay,General::kUltraLowDelay);
     if(!ultraLowDelay) {
         //提高发送性能
-        (*this) << SocketFlags(SOCKET_DEFAULE_FLAGS | FLAG_MORE);
+        setSendFlags(SOCKET_DEFAULE_FLAGS | FLAG_MORE);
         SockUtil::setNoDelay(_sock->rawFD(), false);
     }
 }

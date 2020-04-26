@@ -1,27 +1,11 @@
 ﻿/*
- * MIT License
- *
- * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
 
 #ifndef DEVICE_DEVICE_H_
@@ -46,96 +30,90 @@ using namespace toolkit;
 #include "Codec/H264Encoder.h"
 #endif //ENABLE_X264
 
-
 namespace mediakit {
 
 class VideoInfo {
 public:
+    CodecId codecId = CodecH264;
     int iWidth;
     int iHeight;
     float iFrameRate;
 };
+
 class AudioInfo {
 public:
-    int iChannel;
-    int iSampleBit;
-    int iSampleRate;
-    int iProfile;
+    CodecId codecId = CodecAAC;
+	int iChannel;
+	int iSampleBit;
+	int iSampleRate;
 };
 
 /**
- * 该类已经废弃，保留只为兼容旧代码，请直接使用MultiMediaSourceMuxer类！
+ * MultiMediaSourceMuxer类的包装，方便初学者使用
  */
 class DevChannel  : public MultiMediaSourceMuxer{
 public:
     typedef std::shared_ptr<DevChannel> Ptr;
     //fDuration<=0为直播，否则为点播
-    DevChannel(const string &strVhost,
-               const string &strApp,
-               const string &strId,
-               float fDuration = 0,
-               bool bEanbleRtsp = true,
-               bool bEanbleRtmp = true,
-               bool bEanbleHls = true,
-               bool bEnableMp4 = false);
+    DevChannel(const string &vhost,
+               const string &app,
+               const string &stream_id,
+               float duration = 0,
+               bool enable_rtsp = true,
+               bool enable_rtmp = true,
+               bool enable_hls = true,
+               bool enable_mp4 = false);
 
     virtual ~DevChannel();
 
     /**
-     * 初始化h264视频Track
-     * 相当于MultiMediaSourceMuxer::addTrack(H264Track::Ptr );
-     * @param info
+     * 初始化视频Track
+     * 相当于MultiMediaSourceMuxer::addTrack(VideoTrack::Ptr );
+     * @param info 视频相关信息
      */
     void initVideo(const VideoInfo &info);
 
     /**
-     * 初始化h265视频Track
-     * @param info
-     */
-    void initH265Video(const VideoInfo &info);
-
-    /**
-     * 初始化aac音频Track
-     * 相当于MultiMediaSourceMuxer::addTrack(AACTrack::Ptr );
-     * @param info
+     * 初始化音频Track
+     * 相当于MultiMediaSourceMuxer::addTrack(AudioTrack::Ptr );
+     * @param info 音频相关信息
      */
     void initAudio(const AudioInfo &info);
 
     /**
      * 输入264帧
-     * @param pcData 264单帧数据指针
-     * @param iDataLen 数据指针长度
+     * @param data 264单帧数据指针
+     * @param len 数据指针长度
      * @param dts 解码时间戳，单位毫秒；等于0时内部会自动生成时间戳
      * @param pts 播放时间戳，单位毫秒；等于0时内部会赋值为dts
      */
-    void inputH264(const char *pcData, int iDataLen, uint32_t dts,uint32_t pts = 0);
+    void inputH264(const char *data, int len, uint32_t dts, uint32_t pts = 0);
 
     /**
      * 输入265帧
-     * @param pcData 265单帧数据指针
-     * @param iDataLen 数据指针长度
+     * @param data 265单帧数据指针
+     * @param len 数据指针长度
      * @param dts 解码时间戳，单位毫秒；等于0时内部会自动生成时间戳
      * @param pts 播放时间戳，单位毫秒；等于0时内部会赋值为dts
      */
-    void inputH265(const char *pcData, int iDataLen, uint32_t dts,uint32_t pts = 0);
+    void inputH265(const char *data, int len, uint32_t dts, uint32_t pts = 0);
 
     /**
-     * 输入可能带adts头的aac帧
-     * @param pcDataWithAdts 可能带adts头的aac帧
-     * @param iDataLen 帧数据长度
-     * @param uiStamp 时间戳，单位毫秒，等于0时内部会自动生成时间戳
-     * @param withAdtsHeader 是否带adts头
+     * 输入aac帧
+     * @param data_without_adts 不带adts头的aac帧
+     * @param len 帧数据长度
+     * @param dts 时间戳，单位毫秒
+     * @param adts_header adts头
      */
-    void inputAAC(const char *pcDataWithAdts, int iDataLen, uint32_t uiStamp, bool withAdtsHeader = true);
+    void inputAAC(const char *data_without_adts, int len, uint32_t dts, const char *adts_header);
 
     /**
-     * 输入不带adts头的aac帧
-     * @param pcDataWithoutAdts 不带adts头的aac帧
-     * @param iDataLen 帧数据长度
-     * @param uiStamp 时间戳，单位毫秒
-     * @param pcAdtsHeader adts头
+     * G711音频帧
+     * @param data 音频帧
+     * @param len 帧数据长度
+     * @param dts 时间戳，单位毫秒
      */
-    void inputAAC(const char *pcDataWithoutAdts,int iDataLen, uint32_t uiStamp,const char *pcAdtsHeader);
+    void inputG711(const char* data, int len, uint32_t dts);
 
 #ifdef ENABLE_X264
     /**
@@ -159,6 +137,7 @@ public:
 #endif //ENABLE_FAAC
 
 private:
+
 #ifdef ENABLE_X264
     std::shared_ptr<H264Encoder> _pH264Enc;
 #endif //ENABLE_X264
@@ -168,9 +147,7 @@ private:
 #endif //ENABLE_FAAC
     std::shared_ptr<VideoInfo> _video;
     std::shared_ptr<AudioInfo> _audio;
-
     SmoothTicker _aTicker[2];
-    uint8_t _adtsHeader[7];
 };
 
 } /* namespace mediakit */

@@ -1,29 +1,12 @@
 ﻿/*
- * MIT License
- *
- * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
-
 
 #ifndef ZLMEDIAKIT_MEDIASOURCE_H
 #define ZLMEDIAKIT_MEDIASOURCE_H
@@ -38,7 +21,11 @@
 #include "Util/logger.h"
 #include "Util/TimeTicker.h"
 #include "Util/NoticeCenter.h"
+#include "Util/List.h"
+#include "Rtsp/Rtsp.h"
+#include "Rtmp/Rtmp.h"
 #include "Extension/Track.h"
+#include "Record/Recorder.h"
 
 using namespace std;
 using namespace toolkit;
@@ -62,6 +49,10 @@ public:
     virtual bool close(MediaSource &sender,bool force) { return false;}
     // 观看总人数
     virtual int totalReaderCount(MediaSource &sender) = 0;
+    // 开启或关闭录制
+    virtual bool setupRecord(MediaSource &sender, Recorder::type type, bool start, const string &custom_path) { return false; };
+    // 获取录制状态
+    virtual bool isRecording(MediaSource &sender, Recorder::type type) { return false; };
 private:
     // 通知无人观看
     void onNoneReader(MediaSource &sender);
@@ -121,7 +112,6 @@ public:
     // 获取监听者
     const std::weak_ptr<MediaSourceEvent>& getListener() const;
 
-
     // 本协议获取观看者个数，可能返回本协议的观看人数，也可能返回总人数
     virtual int readerCount() = 0;
     // 观看者个数，包括(hls/rtsp/rtmp)
@@ -138,6 +128,10 @@ public:
     bool close(bool force);
     // 该流无人观看
     void onNoneReader();
+    // 开启或关闭录制
+    virtual bool setupRecord(Recorder::type type, bool start, const string &custom_path);
+    // 获取录制状态
+    virtual bool isRecording(Recorder::type type);
 
     // 同步查找流
     static Ptr find(const string &schema, const string &vhost, const string &app, const string &id, bool bMake = true) ;
@@ -145,6 +139,9 @@ public:
     static void findAsync(const MediaInfo &info, const std::shared_ptr<TcpSession> &session, const function<void(const Ptr &src)> &cb);
     // 遍历所有流
     static void for_each_media(const function<void(const Ptr &src)> &cb);
+
+    // 从mp4文件生成MediaSource
+    static MediaSource::Ptr createFromMP4(const string &schema, const string &vhost, const string &app, const string &stream, const string &filePath = "", bool checkApp = true);
 protected:
     void regist() ;
     bool unregist() ;
@@ -157,6 +154,109 @@ private:
     weak_ptr<TrackSource> _track_source;
     static SchemaVhostAppStreamMap g_mapMediaSrc;
     static recursive_mutex g_mtxMediaSrc;
+};
+
+///缓存刷新策略类
+class FlushPolicy {
+public:
+    FlushPolicy(bool is_audio) {
+        _is_audio = is_audio;
+    };
+
+    ~FlushPolicy() = default;
+
+    uint32_t getStamp(const RtpPacket::Ptr &packet) {
+        return packet->timeStamp;
+    }
+
+    uint32_t getStamp(const RtmpPacket::Ptr &packet) {
+        return packet->timeStamp;
+    }
+
+    bool isFlushAble(uint32_t new_stamp, int cache_size);
+private:
+    bool _is_audio;
+    uint32_t _last_stamp= 0;
+};
+
+/// 视频合并写缓存模板
+/// \tparam packet 包类型
+/// \tparam policy 刷新缓存策略
+/// \tparam packet_list 包缓存类型
+template<typename packet, typename policy = FlushPolicy, typename packet_list = List<std::shared_ptr<packet> > >
+class VideoPacketCache {
+public:
+    VideoPacketCache() : _policy(false) {
+        _cache = std::make_shared<packet_list>();
+    }
+
+    virtual ~VideoPacketCache() = default;
+
+    void inputVideo(const std::shared_ptr<packet> &rtp, bool key_pos) {
+        if (_policy.isFlushAble(_policy.getStamp(rtp), _cache->size())) {
+            flushAll();
+        }
+
+        //追加数据到最后
+        _cache->emplace_back(rtp);
+        if (key_pos) {
+            _key_pos = key_pos;
+        }
+    }
+
+    virtual void onFlushVideo(std::shared_ptr<packet_list> &, bool key_pos) = 0;
+
+private:
+    void flushAll() {
+        if (_cache->empty()) {
+            return;
+        }
+        onFlushVideo(_cache, _key_pos);
+        _cache = std::make_shared<packet_list>();
+        _key_pos = false;
+    }
+
+private:
+    policy _policy;
+    std::shared_ptr<packet_list> _cache;
+    bool _key_pos = false;
+};
+
+/// 音频频合并写缓存模板
+/// \tparam packet 包类型
+/// \tparam policy 刷新缓存策略
+/// \tparam packet_list 包缓存类型
+template<typename packet, typename policy = FlushPolicy, typename packet_list = List<std::shared_ptr<packet> > >
+class AudioPacketCache {
+public:
+    AudioPacketCache() : _policy(true) {
+        _cache = std::make_shared<packet_list>();
+    }
+
+    virtual ~AudioPacketCache() = default;
+
+    void inputAudio(const std::shared_ptr<packet> &rtp) {
+        if (_policy.isFlushAble(_policy.getStamp(rtp), _cache->size())) {
+            flushAll();
+        }
+        //追加数据到最后
+        _cache->emplace_back(rtp);
+    }
+
+    virtual void onFlushAudio(std::shared_ptr<packet_list> &) = 0;
+
+private:
+    void flushAll() {
+        if (_cache->empty()) {
+            return;
+        }
+        onFlushAudio(_cache);
+        _cache = std::make_shared<packet_list>();
+    }
+
+private:
+    policy _policy;
+    std::shared_ptr<packet_list> _cache;
 };
 
 } /* namespace mediakit */

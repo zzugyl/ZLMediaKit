@@ -1,38 +1,20 @@
 ﻿/*
- * MIT License
- *
- * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
 
-
+#include <math.h>
 #include "MediaSource.h"
 #include "Record/MP4Reader.h"
 #include "Util/util.h"
 #include "Network/sockutil.h"
 #include "Network/TcpSession.h"
-
 using namespace toolkit;
-
 namespace mediakit {
 
 recursive_mutex MediaSource::g_mtxMediaSrc;
@@ -78,7 +60,6 @@ vector<Track::Ptr> MediaSource::getTracks(bool trackReady) const {
 
 void MediaSource::setTrackSource(const std::weak_ptr<TrackSource> &track_src) {
     _track_source = track_src;
-    NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastMediaResetTracks, *this);
 }
 
 void MediaSource::setListener(const std::weak_ptr<MediaSourceEvent> &listener){
@@ -122,9 +103,32 @@ void MediaSource::onNoneReader(){
     }
 }
 
+bool MediaSource::setupRecord(Recorder::type type, bool start, const string &custom_path){
+    auto listener = _listener.lock();
+    if (!listener) {
+        return false;
+    }
+    return listener->setupRecord(*this, type, start, custom_path);
+}
+
+bool MediaSource::isRecording(Recorder::type type){
+    auto listener = _listener.lock();
+    if(!listener){
+        return false;
+    }
+    return listener->isRecording(*this, type);
+}
+
 void MediaSource::for_each_media(const function<void(const MediaSource::Ptr &src)> &cb) {
-    lock_guard<recursive_mutex> lock(g_mtxMediaSrc);
-    for (auto &pr0 : g_mapMediaSrc) {
+    decltype(g_mapMediaSrc) copy;
+    {
+        //拷贝g_mapMediaSrc后再遍历，考虑到是高频使用的全局单例锁，并且在上锁时会执行回调代码
+        //很容易导致多个锁交叉死锁的情况，而且该函数使用频率不高，拷贝开销相对来说是可以接受的
+        lock_guard<recursive_mutex> lock(g_mtxMediaSrc);
+        copy = g_mapMediaSrc;
+    }
+
+    for (auto &pr0 : copy) {
         for (auto &pr1 : pr0.second) {
             for (auto &pr2 : pr1.second) {
                 for (auto &pr3 : pr2.second) {
@@ -187,7 +191,7 @@ void findAsync_l(const MediaInfo &info, const std::shared_ptr<TcpSession> &sessi
     void *listener_tag = session.get();
     weak_ptr<TcpSession> weakSession = session;
     //广播未找到流,此时可以立即去拉流，这样还来得及
-    NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastNotFoundStream,info,*session);
+    NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastNotFoundStream,info, static_cast<SockInfo &>(*session));
 
     //最多等待一定时间，如果这个时间内，流未注册上，那么返回未找到流
     GET_CONFIG(int,maxWaitMS,General::kMaxStreamWaitTimeMS);
@@ -276,7 +280,7 @@ MediaSource::Ptr MediaSource::find(const string &schema, const string &vhost_tmp
 
     if(!ret && bMake){
         //未查找媒体源，则创建一个
-        ret = MP4Reader::onMakeMediaSource(schema, vhost,app,id);
+        ret = createFromMP4(schema, vhost, app, id);
     }
     return ret;
 }
@@ -290,7 +294,34 @@ void MediaSource::regist() {
         lock_guard<recursive_mutex> lock(g_mtxMediaSrc);
         g_mapMediaSrc[_strSchema][_strVhost][_strApp][_strId] =  shared_from_this();
     }
-    InfoL << _strSchema << " " << _strVhost << " " << _strApp << " " << _strId;
+    _StrPrinter codec_info;
+    auto tracks = getTracks(true);
+    for(auto &track : tracks) {
+        auto codec_type = track->getTrackType();
+        codec_info << track->getCodecName();
+        switch (codec_type) {
+            case TrackAudio : {
+                auto audio_track = dynamic_pointer_cast<AudioTrack>(track);
+                codec_info << "["
+                           << audio_track->getAudioSampleRate() << "/"
+                           << audio_track->getAudioChannel() << "/"
+                           << audio_track->getAudioSampleBit() << "] ";
+                break;
+            }
+            case TrackVideo : {
+                auto video_track = dynamic_pointer_cast<VideoTrack>(track);
+                codec_info << "["
+                           << video_track->getVideoWidth() << "/"
+                           << video_track->getVideoHeight() << "/"
+                           << round(video_track->getVideoFps()) << "] ";
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    InfoL << _strSchema << " " << _strVhost << " " << _strApp << " " << _strId << " " << codec_info;
     NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastMediaChanged, true, *this);
 }
 
@@ -316,7 +347,7 @@ bool MediaSource::unregist() {
     }
 
     if(ret){
-        InfoL <<  "" <<  _strSchema << " " << _strVhost << " " << _strApp << " " << _strId;
+        InfoL <<  _strSchema << " " << _strVhost << " " << _strApp << " " << _strId;
         NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastMediaChanged, false, *this);
     }
     return ret;
@@ -383,11 +414,17 @@ void MediaInfo::parse(const string &url){
 /////////////////////////////////////MediaSourceEvent//////////////////////////////////////
 
 void MediaSourceEvent::onNoneReader(MediaSource &sender){
-    //没有任何读取器消费该源，表明该源可以关闭了
+    GET_CONFIG(string, recordApp, Record::kAppName);
     GET_CONFIG(int, stream_none_reader_delay, General::kStreamNoneReaderDelayMS);
 
+    //如果mp4点播, 无人观看时我们强制关闭点播
+    bool is_mp4_vod = sender.getApp() == recordApp;
+    //无人观看mp4点播时，3秒后自动关闭
+    auto close_delay = is_mp4_vod ? 3.0 : stream_none_reader_delay / 1000.0;
+
+    //没有任何人观看该视频源，表明该源可以关闭了
     weak_ptr<MediaSource> weakSender = sender.shared_from_this();
-    _async_close_timer = std::make_shared<Timer>(stream_none_reader_delay / 1000.0, [weakSender]() {
+    _async_close_timer = std::make_shared<Timer>(close_delay, [weakSender,is_mp4_vod]() {
         auto strongSender = weakSender.lock();
         if (!strongSender) {
             //对象已经销毁
@@ -399,17 +436,100 @@ void MediaSourceEvent::onNoneReader(MediaSource &sender){
             return false;
         }
 
-        WarnL << "onNoneReader:"
-              << strongSender->getSchema() << "/"
-              << strongSender->getVhost() << "/"
-              << strongSender->getApp() << "/"
-              << strongSender->getId();
+        if(!is_mp4_vod){
+            //直播时触发无人观看事件，让开发者自行选择是否关闭
+            WarnL << "无人观看事件:"
+                  << strongSender->getSchema() << "/"
+                  << strongSender->getVhost() << "/"
+                  << strongSender->getApp() << "/"
+                  << strongSender->getId();
+            NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastStreamNoneReader, *strongSender);
+        }else{
+            //这个是mp4点播，我们自动关闭
+            WarnL << "MP4点播无人观看,自动关闭:"
+                  << strongSender->getSchema() << "/"
+                  << strongSender->getVhost() << "/"
+                  << strongSender->getApp() << "/"
+                  << strongSender->getId();
+            strongSender->close(false);
+        }
 
-        //触发消息广播
-        NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastStreamNoneReader, *strongSender);
         return false;
     }, nullptr);
 }
 
+MediaSource::Ptr MediaSource::createFromMP4(const string &schema, const string &vhost, const string &app, const string &stream, const string &filePath , bool checkApp){
+    GET_CONFIG(string, appName, Record::kAppName);
+    if (checkApp && app != appName) {
+        return nullptr;
+    }
+#ifdef ENABLE_MP4
+    try {
+        MP4Reader::Ptr pReader(new MP4Reader(vhost, app, stream, filePath));
+        pReader->startReadMP4();
+        return MediaSource::find(schema, vhost, app, stream, false);
+    } catch (std::exception &ex) {
+        WarnL << ex.what();
+        return nullptr;
+    }
+#else
+    WarnL << "创建MP4点播失败，请编译时打开\"ENABLE_MP4\"选项";
+    return nullptr;
+#endif //ENABLE_MP4
+}
+
+static bool isFlushAble_default(bool is_audio, uint32_t last_stamp, uint32_t new_stamp, int cache_size) {
+    if (new_stamp < last_stamp) {
+        //时间戳回退(可能seek中)
+        return true;
+    }
+
+    if (!is_audio) {
+        //这是视频,时间戳发送变化或者缓存超过1024个
+        return last_stamp != new_stamp || cache_size >= 1024;
+    }
+
+    //这是音频,缓存超过100ms或者缓存个数超过10个
+    return new_stamp > last_stamp + 100 || cache_size > 10;
+}
+
+static bool isFlushAble_merge(bool is_audio, uint32_t last_stamp, uint32_t new_stamp, int cache_size, int merge_ms) {
+    if (new_stamp < last_stamp) {
+        //时间戳回退(可能seek中)
+        return true;
+    }
+
+    if(new_stamp > last_stamp + merge_ms){
+        //时间戳增量超过合并写阈值
+        return true;
+    }
+
+    if (!is_audio) {
+        //这是视频,缓存数超过1024个,这个逻辑用于避免时间戳异常的流导致的内存暴增问题
+        //而且sendmsg接口一般最多只能发送1024个数据包
+        return cache_size >= 1024;
+    }
+
+    //这是音频，音频缓存超过20个
+    return cache_size > 20;
+}
+
+bool FlushPolicy::isFlushAble(uint32_t new_stamp, int cache_size) {
+    bool ret = false;
+    GET_CONFIG(bool, ultraLowDelay, General::kUltraLowDelay);
+    GET_CONFIG(int, mergeWriteMS, General::kMergeWriteMS);
+    if (ultraLowDelay || mergeWriteMS <= 0) {
+        //关闭了合并写或者合并写阈值小于等于0
+        ret = isFlushAble_default(_is_audio, _last_stamp, new_stamp, cache_size);
+    } else {
+        ret = isFlushAble_merge(_is_audio, _last_stamp, new_stamp, cache_size, mergeWriteMS);
+    }
+
+    if (ret) {
+//        DebugL << _is_audio << " " << _last_stamp  << " " << new_stamp;
+        _last_stamp = new_stamp;
+    }
+    return ret;
+}
 
 } /* namespace mediakit */

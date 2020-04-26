@@ -1,36 +1,18 @@
 ﻿/*
- * MIT License
- *
- * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
-#include <stdio.h>
-#include <stdio.h>
+
 #include "Device.h"
 #include "Util/logger.h"
-#include "Util/util.h"
 #include "Util/base64.h"
-#include "Util/TimeTicker.h"
 #include "Extension/AAC.h"
+#include "Extension/G711.h"
 #include "Extension/H264.h"
 #include "Extension/H265.h"
 
@@ -38,15 +20,15 @@ using namespace toolkit;
 
 namespace mediakit {
 
-DevChannel::DevChannel(const string &strVhost,
-                       const string &strApp,
-                       const string &strId,
-                       float fDuration,
-                       bool bEanbleRtsp,
-                       bool bEanbleRtmp,
-                       bool bEanbleHls,
-                       bool bEnableMp4) :
-        MultiMediaSourceMuxer(strVhost, strApp, strId, fDuration, bEanbleRtsp, bEanbleRtmp, bEanbleHls, bEnableMp4) {}
+DevChannel::DevChannel(const string &vhost,
+                       const string &app,
+                       const string &stream_id,
+                       float duration,
+                       bool enable_rtsp,
+                       bool enable_rtmp,
+                       bool enable_hls,
+                       bool enable_mp4) :
+        MultiMediaSourceMuxer(vhost, app, stream_id, duration, enable_rtsp, enable_rtmp, enable_hls, enable_mp4) {}
 
 DevChannel::~DevChannel() {}
 
@@ -82,14 +64,14 @@ void DevChannel::inputPCM(char* pcData, int iDataLen, uint32_t uiStamp) {
     if (_pAacEnc) {
         unsigned char *pucOut;
         int iRet = _pAacEnc->inputData(pcData, iDataLen, &pucOut);
-        if (iRet > 0) {
-            inputAAC((char *) pucOut, iRet, uiStamp);
+        if (iRet > 7) {
+            inputAAC((char *) pucOut + 7, iRet - 7, uiStamp, (char *)pucOut);
         }
     }
 }
 #endif //ENABLE_FAAC
 
-void DevChannel::inputH264(const char* pcData, int iDataLen, uint32_t dts,uint32_t pts) {
+void DevChannel::inputH264(const char *data, int len, uint32_t dts, uint32_t pts) {
     if(dts == 0){
         dts = (uint32_t)_aTicker[0].elapsedTime();
     }
@@ -97,24 +79,27 @@ void DevChannel::inputH264(const char* pcData, int iDataLen, uint32_t dts,uint32
         pts = dts;
     }
     int prefixeSize;
-    if (memcmp("\x00\x00\x00\x01", pcData, 4) == 0) {
+    if (memcmp("\x00\x00\x00\x01", data, 4) == 0) {
         prefixeSize = 4;
-    } else if (memcmp("\x00\x00\x01", pcData, 3) == 0) {
+    } else if (memcmp("\x00\x00\x01", data, 3) == 0) {
         prefixeSize = 3;
     } else {
         prefixeSize = 0;
     }
 
+    //由于rtmp/hls/mp4需要缓存时间戳相同的帧，
+    //所以使用FrameNoCacheAble类型的帧反而会在转换成FrameCacheAble时多次内存拷贝
+    //在此处只拷贝一次，性能开销更低
     H264Frame::Ptr frame = std::make_shared<H264Frame>();
     frame->_dts = dts;
     frame->_pts = pts;
     frame->_buffer.assign("\x00\x00\x00\x01",4);
-    frame->_buffer.append(pcData + prefixeSize, iDataLen - prefixeSize);
+    frame->_buffer.append(data + prefixeSize, len - prefixeSize);
     frame->_prefix_size = 4;
     inputFrame(frame);
 }
 
-void DevChannel::inputH265(const char* pcData, int iDataLen, uint32_t dts,uint32_t pts) {
+void DevChannel::inputH265(const char *data, int len, uint32_t dts, uint32_t pts) {
     if(dts == 0){
         dts = (uint32_t)_aTicker[0].elapsedTime();
     }
@@ -122,84 +107,82 @@ void DevChannel::inputH265(const char* pcData, int iDataLen, uint32_t dts,uint32
         pts = dts;
     }
     int prefixeSize;
-    if (memcmp("\x00\x00\x00\x01", pcData, 4) == 0) {
+    if (memcmp("\x00\x00\x00\x01", data, 4) == 0) {
         prefixeSize = 4;
-    } else if (memcmp("\x00\x00\x01", pcData, 3) == 0) {
+    } else if (memcmp("\x00\x00\x01", data, 3) == 0) {
         prefixeSize = 3;
     } else {
         prefixeSize = 0;
     }
 
+    //由于rtmp/hls/mp4需要缓存时间戳相同的帧，
+    //所以使用FrameNoCacheAble类型的帧反而会在转换成FrameCacheAble时多次内存拷贝
+    //在此处只拷贝一次，性能开销更低
     H265Frame::Ptr frame = std::make_shared<H265Frame>();
     frame->_dts = dts;
     frame->_pts = pts;
     frame->_buffer.assign("\x00\x00\x00\x01",4);
-    frame->_buffer.append(pcData + prefixeSize, iDataLen - prefixeSize);
+    frame->_buffer.append(data + prefixeSize, len - prefixeSize);
     frame->_prefix_size = 4;
     inputFrame(frame);
 }
 
-void DevChannel::inputAAC(const char* pcData, int iDataLen, uint32_t uiStamp,bool withAdtsHeader) {
-    if(withAdtsHeader){
-        inputAAC(pcData+7,iDataLen-7,uiStamp,pcData);
-    } else if(_audio) {
-        inputAAC(pcData,iDataLen,uiStamp,(char *)_adtsHeader);
+class AACFrameCacheAble : public AACFrameNoCacheAble{
+public:
+    template <typename ... ARGS>
+    AACFrameCacheAble(ARGS && ...args) : AACFrameNoCacheAble(std::forward<ARGS>(args)...){};
+    virtual ~AACFrameCacheAble() {
+        delete [] _ptr;
+    };
+
+    bool cacheAble() const override {
+        return true;
+    }
+};
+
+void DevChannel::inputAAC(const char *data_without_adts, int len, uint32_t dts, const char *adts_header){
+    if(dts == 0){
+        dts = (uint32_t)_aTicker[1].elapsedTime();
+    }
+
+    if(adts_header){
+        if(adts_header + 7 == data_without_adts){
+            //adts头和帧在一起
+            inputFrame(std::make_shared<AACFrameNoCacheAble>((char *)data_without_adts - 7, len + 7, dts, 0, 7));
+        }else{
+            //adts头和帧不在一起
+            char *dataWithAdts = new char[len + 7];
+            memcpy(dataWithAdts, adts_header, 7);
+            memcpy(dataWithAdts + 7 , data_without_adts , len);
+            inputFrame(std::make_shared<AACFrameCacheAble>(dataWithAdts, len + 7, dts, 0, 7));
+        }
     }
 }
 
-void DevChannel::inputAAC(const char *pcDataWithoutAdts,int iDataLen, uint32_t uiStamp,const char *pcAdtsHeader){
-    if(uiStamp == 0){
-        uiStamp = (uint32_t)_aTicker[1].elapsedTime();
+void DevChannel::inputG711(const char *data, int len, uint32_t dts){
+    if (dts == 0) {
+        dts = (uint32_t)_aTicker[1].elapsedTime();
     }
-    if(pcAdtsHeader + 7 == pcDataWithoutAdts){
-        inputFrame(std::make_shared<AACFrameNoCacheAble>((char *)pcDataWithoutAdts - 7,iDataLen + 7,uiStamp,7));
-    } else {
-        char *dataWithAdts = new char[iDataLen + 7];
-        memcpy(dataWithAdts,pcAdtsHeader,7);
-        memcpy(dataWithAdts + 7 , pcDataWithoutAdts , iDataLen);
-        inputFrame(std::make_shared<AACFrameNoCacheAble>(dataWithAdts,iDataLen + 7,uiStamp,7));
-        delete [] dataWithAdts;
-    }
+    inputFrame(std::make_shared<G711FrameNoCacheAble>(_audio->codecId, (char*)data, len, dts, 0));
 }
 
-
-void DevChannel::initVideo(const VideoInfo& info) {
+void DevChannel::initVideo(const VideoInfo &info) {
     _video = std::make_shared<VideoInfo>(info);
-    addTrack(std::make_shared<H264Track>());
+    switch (info.codecId){
+        case CodecH265 : addTrack(std::make_shared<H265Track>()); break;
+        case CodecH264 : addTrack(std::make_shared<H264Track>()); break;
+        default: WarnL << "不支持该类型的视频编码类型:" << info.codecId; break;
+    }
 }
 
-void DevChannel::initH265Video(const VideoInfo &info){
-    _video = std::make_shared<VideoInfo>(info);
-    addTrack(std::make_shared<H265Track>());
-}
-
-void DevChannel::initAudio(const AudioInfo& info) {
+void DevChannel::initAudio(const AudioInfo &info) {
     _audio = std::make_shared<AudioInfo>(info);
-    addTrack(std::make_shared<AACTrack>());
-
-    AACFrame adtsHeader;
-    adtsHeader.syncword = 0x0FFF;
-    adtsHeader.id = 0;
-    adtsHeader.layer = 0;
-    adtsHeader.protection_absent = 1;
-    adtsHeader.profile =  info.iProfile;//audioObjectType - 1;
-    int i = 0;
-    for(auto rate : samplingFrequencyTable){
-        if(rate == info.iSampleRate){
-            adtsHeader.sf_index = i;
-        };
-        ++i;
+    switch (info.codecId) {
+        case CodecAAC : addTrack(std::make_shared<AACTrack>()); break;
+        case CodecG711A :
+        case CodecG711U : addTrack(std::make_shared<G711Track>(info.codecId, info.iSampleRate, info.iChannel, info.iSampleBit)); break;
+        default: WarnL << "不支持该类型的音频编码类型:" << info.codecId; break;
     }
-    adtsHeader.private_bit = 0;
-    adtsHeader.channel_configuration = info.iChannel;
-    adtsHeader.original = 0;
-    adtsHeader.home = 0;
-    adtsHeader.copyright_identification_bit = 0;
-    adtsHeader.copyright_identification_start = 0;
-    adtsHeader.aac_frame_length = 7;
-    adtsHeader.adts_buffer_fullness = 2047;
-    adtsHeader.no_raw_data_blocks_in_frame = 0;
-    writeAdtsHeader(adtsHeader,_adtsHeader);
 }
 
 } /* namespace mediakit */

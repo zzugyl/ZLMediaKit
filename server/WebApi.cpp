@@ -1,33 +1,18 @@
 ﻿/*
- * MIT License
- *
- * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
 
 #include <signal.h>
 #include <functional>
 #include <sstream>
 #include <unordered_map>
+#include <math.h>
 #include "jsoncpp/json.h"
 #include "Util/util.h"
 #include "Util/logger.h"
@@ -54,11 +39,12 @@ using namespace mediakit;
 
 namespace API {
 typedef enum {
-    InvalidArgs = -300,
-    SqlFailed = -200,
-    AuthFailed = -100,
-    OtherFailed = -1,
-    Success = 0
+    Exception = -400,//代码抛异常
+    InvalidArgs = -300,//参数不合法
+    SqlFailed = -200,//sql执行失败
+    AuthFailed = -100,//鉴权失败
+    OtherFailed = -1,//业务代码执行失败，
+    Success = 0//执行成功
 } ApiErr;
 
 #define API_FIELD "api."
@@ -101,7 +87,7 @@ public:
     ~SuccessException() = default;
 };
 
-#define API_ARGS1 TcpSession &sender,HttpSession::KeyValue &headerIn, HttpSession::KeyValue &headerOut, ApiArgsType &allArgs, Json::Value &val
+#define API_ARGS1 SockInfo &sender,HttpSession::KeyValue &headerIn, HttpSession::KeyValue &headerOut, ApiArgsType &allArgs, Json::Value &val
 #define API_ARGS2 API_ARGS1, const HttpSession::HttpResponseInvoker &invoker
 #define API_ARGS_VALUE1 sender,headerIn,headerOut,allArgs,val
 #define API_ARGS_VALUE2 API_ARGS_VALUE1, invoker
@@ -169,8 +155,9 @@ static inline void addHttpListener(){
         val["code"] = API::Success;
         HttpSession::KeyValue headerOut;
         auto allArgs = getAllArgs(parser);
-        HttpSession::KeyValue &headerIn = parser.getValues();
-        headerOut["Content-Type"] = "application/json; charset=utf-8";
+        HttpSession::KeyValue &headerIn = parser.getHeader();
+        GET_CONFIG(string,charSet,Http::kCharSet);
+        headerOut["Content-Type"] = StrPrinter << "application/json; charset=" << charSet;
         if(api_debug){
             auto newInvoker = [invoker,parser,allArgs](const string &codeOut,
                                                        const HttpSession::KeyValue &headerOut,
@@ -223,7 +210,7 @@ static inline void addHttpListener(){
         }
 #endif// ENABLE_MYSQL
         catch (std::exception &ex) {
-            val["code"] = API::OtherFailed;
+            val["code"] = API::Exception;
             val["msg"] = ex.what();
             invoker("200 OK", headerOut, val.toStyledString());
         }
@@ -386,6 +373,44 @@ void installWebApi() {
 #endif//#if !defined(_WIN32)
 
 
+    static auto makeMediaSourceJson = [](const MediaSource::Ptr &media){
+        Value item;
+        item["schema"] = media->getSchema();
+        item["vhost"] = media->getVhost();
+        item["app"] = media->getApp();
+        item["stream"] = media->getId();
+        item["readerCount"] = media->readerCount();
+        item["totalReaderCount"] = media->totalReaderCount();
+        for(auto &track : media->getTracks()){
+            Value obj;
+            auto codec_type = track->getTrackType();
+            obj["codec_id"] = track->getCodecId();
+            obj["codec_id_name"] = track->getCodecName();
+            obj["ready"] = track->ready();
+            obj["codec_type"] = codec_type;
+            switch(codec_type){
+                case TrackAudio : {
+                    auto audio_track = dynamic_pointer_cast<AudioTrack>(track);
+                    obj["sample_rate"] = audio_track->getAudioSampleRate();
+                    obj["channels"] = audio_track->getAudioChannel();
+                    obj["sample_bit"] = audio_track->getAudioSampleBit();
+                    break;
+                }
+                case TrackVideo : {
+                    auto video_track = dynamic_pointer_cast<VideoTrack>(track);
+                    obj["width"] = video_track->getVideoWidth();
+                    obj["height"] = video_track->getVideoHeight();
+                    obj["fps"] = round(video_track->getVideoFps());
+                    break;
+                }
+                default:
+                    break;
+            }
+            item["tracks"].append(obj);
+        }
+        return item;
+    };
+
     //获取流列表，可选筛选参数
     //测试url0(获取所有流) http://127.0.0.1/index/api/getMediaList
     //测试url1(获取虚拟主机为"__defaultVost__"的流) http://127.0.0.1/index/api/getMediaList?vhost=__defaultVost__
@@ -403,21 +428,7 @@ void installWebApi() {
             if(!allArgs["app"].empty() && allArgs["app"] != media->getApp()){
                 return;
             }
-            Value item;
-            item["schema"] = media->getSchema();
-            item["vhost"] = media->getVhost();
-            item["app"] = media->getApp();
-            item["stream"] = media->getId();
-            item["readerCount"] = media->readerCount();
-            item["totalReaderCount"] = media->totalReaderCount();
-            for(auto &track : media->getTracks()){
-                Value obj;
-                obj["codec_id"] = track->getCodecId();
-                obj["codec_type"] = track->getTrackType();
-                obj["ready"] = track->ready();
-                item["tracks"].append(obj);
-            }
-            val["data"].append(item);
+            val["data"].append(makeMediaSourceJson(media));
         });
     });
 
@@ -437,16 +448,9 @@ void installWebApi() {
             val["online"] = false;
             return;
         }
+        val = makeMediaSourceJson(src);
         val["online"] = true;
-        val["readerCount"] = src->readerCount();
-        val["totalReaderCount"] = src->totalReaderCount();
-        for(auto &track : src->getTracks()){
-            Value obj;
-            obj["codec_id"] = track->getCodecId();
-            obj["codec_type"] = track->getTrackType();
-            obj["ready"] = track->ready();
-            val["tracks"].append(obj);
-        }
+        val["code"] = API::Success;
     });
 
     //主动关断流，包括关断拉流、推流
@@ -463,9 +467,11 @@ void installWebApi() {
             bool flag = src->close(allArgs["force"].as<bool>());
             val["result"] = flag ? 0 : -1;
             val["msg"] = flag ? "success" : "close failed";
+            val["code"] = API::OtherFailed;
         }else{
             val["result"] = -2;
             val["msg"] = "can not find the stream";
+            val["code"] = API::OtherFailed;
         }
     });
 
@@ -740,38 +746,38 @@ void installWebApi() {
     // 开始录制hls或MP4
     api_regist1("/index/api/startRecord",[](API_ARGS1){
         CHECK_SECRET();
-        CHECK_ARGS("type","vhost","app","stream","wait_for_record","continue_record");
-
-        int result = Recorder::startRecord((Recorder::type)allArgs["type"].as<int>(),
-                                           allArgs["vhost"],
-                                           allArgs["app"],
-                                           allArgs["stream"],
-                                           allArgs["customized_path"],
-                                           allArgs["wait_for_record"],
-                                           allArgs["continue_record"]);
+        CHECK_ARGS("type","vhost","app","stream");
+        auto result = Recorder::startRecord((Recorder::type) allArgs["type"].as<int>(),
+                                              allArgs["vhost"],
+                                              allArgs["app"],
+                                              allArgs["stream"],
+                                              allArgs["customized_path"]);
         val["result"] = result;
+        val["code"] = result ? API::Success : API::OtherFailed;
+        val["msg"] = result ? "success" :  "start record failed";
     });
 
     // 停止录制hls或MP4
     api_regist1("/index/api/stopRecord",[](API_ARGS1){
         CHECK_SECRET();
         CHECK_ARGS("type","vhost","app","stream");
-        int result = Recorder::stopRecord((Recorder::type)allArgs["type"].as<int>(),
-                                          allArgs["vhost"],
-                                          allArgs["app"],
-                                          allArgs["stream"]);
+        auto result = Recorder::stopRecord((Recorder::type) allArgs["type"].as<int>(),
+                                             allArgs["vhost"],
+                                             allArgs["app"],
+                                             allArgs["stream"]);
         val["result"] = result;
+        val["code"] = result ? API::Success : API::OtherFailed;
+        val["msg"] = result ? "success" :  "stop record failed";
     });
 
     // 获取hls或MP4录制状态
-    api_regist1("/index/api/getRecordStatus",[](API_ARGS1){
+    api_regist1("/index/api/isRecording",[](API_ARGS1){
         CHECK_SECRET();
         CHECK_ARGS("type","vhost","app","stream");
-        auto status = Recorder::getRecordStatus((Recorder::type)allArgs["type"].as<int>(),
-                                                allArgs["vhost"],
-                                                allArgs["app"],
-                                                allArgs["stream"]);
-        val["status"] = (int)status;
+        val["status"] = Recorder::isRecording((Recorder::type) allArgs["type"].as<int>(),
+                                              allArgs["vhost"],
+                                              allArgs["app"],
+                                              allArgs["stream"]);
     });
 
     //获取录像文件夹列表或mp4文件列表
@@ -824,12 +830,10 @@ void installWebApi() {
 
     api_regist1("/index/hook/on_play",[](API_ARGS1){
         //开始播放事件
-        throw SuccessException();
     });
 
     api_regist1("/index/hook/on_flow_report",[](API_ARGS1){
         //流量统计hook api
-        throw SuccessException();
     });
 
     api_regist1("/index/hook/on_rtsp_realm",[](API_ARGS1){
@@ -849,7 +853,6 @@ void installWebApi() {
 
     api_regist1("/index/hook/on_stream_changed",[](API_ARGS1){
         //媒体注册或反注册事件
-        throw SuccessException();
     });
 
 
@@ -912,12 +915,10 @@ void installWebApi() {
 
     api_regist1("/index/hook/on_record_mp4",[](API_ARGS1){
         //录制mp4分片完毕事件
-        throw SuccessException();
     });
 
     api_regist1("/index/hook/on_shell_login",[](API_ARGS1){
         //shell登录调试事件
-        throw SuccessException();
     });
 
     api_regist1("/index/hook/on_stream_none_reader",[](API_ARGS1){
@@ -953,7 +954,6 @@ void installWebApi() {
 
     api_regist1("/index/hook/on_server_started",[](API_ARGS1){
         //服务器重启报告
-        throw SuccessException();
     });
 
 

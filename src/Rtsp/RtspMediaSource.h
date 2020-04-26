@@ -1,27 +1,11 @@
 ﻿/*
- * MIT License
- *
- * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
 
 #ifndef SRC_RTSP_RTSPMEDIASOURCE_H_
@@ -43,22 +27,24 @@
 #include "Thread/ThreadPool.h"
 using namespace std;
 using namespace toolkit;
-
-#define RTP_GOP_SIZE 2048
-
+#define RTP_GOP_SIZE 512
 namespace mediakit {
 
-/**
+typedef VideoPacketCache<RtpPacket> RtpVideoCache;
+typedef AudioPacketCache<RtpPacket> RtpAudioCache;
+
+    /**
  * rtsp媒体源的数据抽象
  * rtsp有关键的两要素，分别是sdp、rtp包
  * 只要生成了这两要素，那么要实现rtsp推流、rtsp服务器就很简单了
  * rtsp推拉流协议中，先传递sdp，然后再协商传输方式(tcp/udp/组播)，最后一直传递rtp
  */
-class RtspMediaSource : public MediaSource, public RingDelegate<RtpPacket::Ptr> {
+class RtspMediaSource : public MediaSource, public RingDelegate<RtpPacket::Ptr>, public RtpVideoCache, public RtpAudioCache {
 public:
     typedef ResourcePool<RtpPacket> PoolType;
     typedef std::shared_ptr<RtspMediaSource> Ptr;
-    typedef RingBuffer<RtpPacket::Ptr> RingType;
+    typedef std::shared_ptr<List<RtpPacket::Ptr> > RingDataType;
+    typedef RingBuffer<RingDataType> RingType;
 
     /**
      * 构造函数
@@ -133,7 +119,7 @@ public:
             case 1:
                 return tracks[0]->_time_stamp;
             default:
-                return MAX(tracks[0]->_time_stamp, tracks[1]->_time_stamp);
+                return MIN(tracks[0]->_time_stamp, tracks[1]->_time_stamp);
         }
     }
 
@@ -189,10 +175,34 @@ public:
                 regist();
             }
         }
-        //不存在视频，为了减少缓存延时，那么关闭GOP缓存
-        _ring->write(rtp, _have_video ? keyPos : true);
+
+        if(rtp->type == TrackVideo){
+            RtpVideoCache::inputVideo(rtp, keyPos);
+        }else{
+            RtpAudioCache::inputAudio(rtp);
+        }
     }
+
 private:
+
+    /**
+     * 批量flush时间戳相同的视频rtp包时触发该函数
+     * @param rtp_list 时间戳相同的rtp包列表
+     * @param key_pos 是否包含关键帧
+     */
+    void onFlushVideo(std::shared_ptr<List<RtpPacket::Ptr> > &rtp_list, bool key_pos) override {
+        _ring->write(rtp_list, key_pos);
+    }
+
+    /**
+     * 批量flush一定数量的音频rtp包时触发该函数
+     * @param rtp_list rtp包列表
+     */
+    void onFlushAudio(std::shared_ptr<List<RtpPacket::Ptr> > &rtp_list) override{
+        //只有音频的话，就不存在gop缓存的意义
+        _ring->write(rtp_list, !_have_video);
+    }
+
     /**
      * 每次增减消费者都会触发该函数
      */

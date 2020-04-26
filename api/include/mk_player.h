@@ -1,27 +1,11 @@
 ﻿/*
- * MIT License
- *
- * Copyright (c) 2019 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
 
 #ifndef MK_PLAYER_H_
@@ -47,7 +31,7 @@ typedef void(API_CALL *on_mk_play_event)(void *user_data,int err_code,const char
  * 收到音视频数据回调
  * @param user_data 用户数据指针
  * @param track_type 0：视频，1：音频
- * @param codec_id 0：H264，1：H265，2：AAC
+ * @param codec_id 0：H264，1：H265，2：AAC 3.G711A 4.G711U
  * @param data 数据指针
  * @param len 数据长度
  * @param dts 解码时间戳，单位毫秒
@@ -114,12 +98,20 @@ API_EXPORT void API_CALL mk_player_set_on_shutdown(mk_player ctx, on_mk_play_eve
 
 /**
  * 设置音视频数据回调函数
- * 该接口只能在播放成功事件触发后才能调用
+ * 该接口在播放成功事件触发后才有效
  * @param ctx 播放器指针
  * @param cb 回调函数指针,不得为null
  * @param user_data 用户数据指针
  */
 API_EXPORT void API_CALL mk_player_set_on_data(mk_player ctx, on_mk_play_data cb, void *user_data);
+
+///////////////////////////获取音视频相关信息接口在播放成功回调触发后才有效///////////////////////////////
+
+/**
+ * 获取视频codec_id -1：不存在 0：H264，1：H265，2：AAC 3.G711A 4.G711U
+ * @param ctx 播放器指针
+ */
+API_EXPORT int API_CALL mk_player_video_codecId(mk_player ctx);
 
 /**
  * 获取视频宽度
@@ -135,6 +127,12 @@ API_EXPORT int API_CALL mk_player_video_height(mk_player ctx);
  * 获取视频帧率
  */
 API_EXPORT int API_CALL mk_player_video_fps(mk_player ctx);
+
+/**
+ * 获取音频codec_id -1：不存在 0：H264，1：H265，2：AAC 3.G711A 4.G711U
+ * @param ctx 播放器指针
+ */
+API_EXPORT int API_CALL mk_player_audio_codecId(mk_player ctx);
 
 /**
  * 获取音频采样率

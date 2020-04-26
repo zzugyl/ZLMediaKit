@@ -1,28 +1,13 @@
 ﻿/*
- * MIT License
- *
- * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
+
 #if !defined(_WIN32)
 #include <dirent.h>
 #endif //!defined(_WIN32)
@@ -74,7 +59,7 @@ int64_t HttpSession::onRecvHeader(const char *header,uint64_t len) {
     string cmd = _parser.Method();
     auto it = s_func_map.find(cmd);
     if (it == s_func_map.end()) {
-        WarnL << "不支持该命令:" << cmd;
+        WarnP(this) << "不支持该命令:" << cmd;
         sendResponse("405 Not Allowed", true);
         return 0;
     }
@@ -123,7 +108,7 @@ void HttpSession::onError(const SockException& err) {
 
         GET_CONFIG(uint32_t,iFlowThreshold,General::kFlowThreshold);
         if(_ui64TotalBytes > iFlowThreshold * 1024){
-            NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastFlowReport, _mediaInfo, _ui64TotalBytes, duration , true, getIdentifier(), get_peer_ip(), get_peer_port());
+            NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastFlowReport, _mediaInfo, _ui64TotalBytes, duration , true, static_cast<SockInfo &>(*this));
         }
         return;
     }
@@ -256,7 +241,7 @@ bool HttpSession::checkLiveFlvStream(const function<void()> &cb){
                 onRes(err);
             });
         };
-        auto flag = NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastMediaPlayed,_mediaInfo,invoker,*this);
+        auto flag = NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastMediaPlayed,_mediaInfo,invoker,static_cast<SockInfo &>(*this));
         if(!flag){
             //该事件无人监听,默认不鉴权
             onRes("");
@@ -398,7 +383,6 @@ static const string kContentType = "Content-Type";
 static const string kContentLength = "Content-Length";
 static const string kAccessControlAllowOrigin = "Access-Control-Allow-Origin";
 static const string kAccessControlAllowCredentials = "Access-Control-Allow-Credentials";
-static const string kServerName = SERVER_NAME;
 
 void HttpSession::sendResponse(const char *pcStatus,
                                bool bClose,
@@ -426,7 +410,7 @@ void HttpSession::sendResponse(const char *pcStatus,
 
     HttpSession::KeyValue &headerOut = const_cast<HttpSession::KeyValue &>(header);
     headerOut.emplace(kDate, dateStr());
-    headerOut.emplace(kServer, kServerName);
+    headerOut.emplace(kServer, SERVER_NAME);
     headerOut.emplace(kConnection, bClose ? "close" : "keep-alive");
     if(!bClose){
         string keepAliveString = "timeout=";
@@ -472,7 +456,7 @@ void HttpSession::sendResponse(const char *pcStatus,
         str += "\r\n";
     }
     str += "\r\n";
-    send(std::move(str));
+    SockSender::send(std::move(str));
     _ticker.resetTime();
 
     if(!size){
@@ -536,7 +520,7 @@ bool HttpSession::emitHttpEvent(bool doInvoke){
     };
     ///////////////////广播HTTP事件///////////////////////////
     bool consumed = false;//该事件是否被消费
-    NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastHttpRequest,_parser,invoker,consumed,*this);
+    NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastHttpRequest,_parser,invoker,consumed,static_cast<SockInfo &>(*this));
     if(!consumed && doInvoke){
         //该事件无人消费，所以返回404
         invoker("404 Not Found",KeyValue(), HttpBody::Ptr());
@@ -627,24 +611,33 @@ void HttpSession::setSocketFlags(){
         //推流模式下，关闭TCP_NODELAY会增加推流端的延时，但是服务器性能将提高
         SockUtil::setNoDelay(_sock->rawFD(), false);
         //播放模式下，开启MSG_MORE会增加延时，但是能提高发送性能
-        (*this) << SocketFlags(SOCKET_DEFAULE_FLAGS | FLAG_MORE);
+        setSendFlags(SOCKET_DEFAULE_FLAGS | FLAG_MORE);
     }
 }
 
-void HttpSession::onWrite(const Buffer::Ptr &buffer) {
+void HttpSession::onWrite(const Buffer::Ptr &buffer, bool flush) {
+    if(flush){
+        //需要flush那么一次刷新缓存
+        HttpSession::setSendFlushFlag(true);
+    }
+
     _ticker.resetTime();
     if(!_flv_over_websocket){
         _ui64TotalBytes += buffer->size();
         send(buffer);
-        return;
+    }else{
+        WebSocketHeader header;
+        header._fin = true;
+        header._reserved = 0;
+        header._opcode = WebSocketHeader::BINARY;
+        header._mask_flag = false;
+        WebSocketSplitter::encode(header,buffer);
     }
 
-    WebSocketHeader header;
-    header._fin = true;
-    header._reserved = 0;
-    header._opcode = WebSocketHeader::BINARY;
-    header._mask_flag = false;
-    WebSocketSplitter::encode(header,buffer);
+    if(flush){
+        //本次刷新缓存后，下次不用刷新缓存
+        HttpSession::setSendFlushFlag(false);
+    }
 }
 
 void HttpSession::onWebSocketEncodeData(const Buffer::Ptr &buffer){

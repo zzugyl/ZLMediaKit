@@ -20,7 +20,7 @@
   - RTSP player and pusher.
   - RTP Transport : `rtp over udp` `rtp over tcp` `rtp over http` `rtp udp multicast` .
   - Basic/Digest/Url Authentication.
-  - H265/H264/AAC codec.
+  - H264/H265/AAC/G711 codec.
   - Recorded as mp4.
   - Vod of mp4.
   
@@ -28,9 +28,10 @@
   - RTMP server,support player and pusher.
   - RTMP player and pusher.
   - Support HTTP-FLV player.
-  - H264/AAC codec.
+  - H264/H265/AAC/G711 codec.
   - Recorded as flv or mp4.
   - Vod of mp4.
+  - support [RTMP-H265](https://github.com/ksvc/FFmpeg/wiki)
   
 - HLS
   - RTSP RTMP can be converted into HLS,built-in HTTP server.
@@ -58,14 +59,14 @@
 
 |          protocol/codec          | H264 | H265 | AAC  | other |
 | :------------------------------: | :--: | :--: | :--: | :---: |
-| RTSP[S] --> RTMP/HTTP[S]-FLV/FLV |  Y   |  N   |  Y   |   N   |
-|         RTMP --> RTSP[S]         |  Y   |  N   |  Y   |   N   |
+| RTSP[S] --> RTMP/HTTP[S]-FLV/FLV |  Y   |  Y   |  Y   |   N   |
+|         RTMP --> RTSP[S]         |  Y   |  Y   |  Y   |   N   |
 |         RTSP[S] --> HLS          |  Y   |  Y   |  Y   |   N   |
-|           RTMP --> HLS           |  Y   |  N   |  Y   |   N   |
+|           RTMP --> HLS           |  Y   |  Y   |  Y   |   N   |
 |         RTSP[S] --> MP4          |  Y   |  Y   |  Y   |   N   |
-|           RTMP --> MP4           |  Y   |  N   |  Y   |   N   |
-|         MP4 --> RTSP[S]          |  Y   |  N   |  Y   |   N   |
-|           MP4 --> RTMP           |  Y   |  N   |  Y   |   N   |
+|           RTMP --> MP4           |  Y   |  Y   |  Y   |   N   |
+|         MP4 --> RTSP[S]          |  Y   |  Y   |  Y   |   N   |
+|           MP4 --> RTMP           |  Y   |  Y   |  Y   |   N   |
 
 - Stream generation：
 
@@ -342,7 +343,7 @@ SOFTWARE.
 
 
 ## Contact
- - Email：<771730766@qq.com>
+ - Email：<1213642868@qq.com>
  - QQ chat group：542509000
 
 

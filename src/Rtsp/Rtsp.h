@@ -1,28 +1,13 @@
 ﻿/*
- * MIT License
- *
- * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
+
 #ifndef RTSP_RTSP_H_
 #define RTSP_RTSP_H_
 
@@ -49,33 +34,33 @@ typedef enum {
 } eRtpType;
 
 #define RTP_PT_MAP(XX) \
-    XX(PCMU, TrackAudio, 0, 8000, 1) \
-    XX(GSM, TrackAudio , 3, 8000, 1) \
-    XX(G723, TrackAudio, 4, 8000, 1) \
-    XX(DVI4_8000, TrackAudio, 5, 8000, 1) \
-    XX(DVI4_16000, TrackAudio, 6, 16000, 1) \
-    XX(LPC, TrackAudio, 7, 8000, 1) \
-    XX(PCMA, TrackAudio, 8, 8000, 1) \
-    XX(G722, TrackAudio, 9, 8000, 1) \
-    XX(L16_Stereo, TrackAudio, 10, 44100, 2) \
-    XX(L16_Mono, TrackAudio, 11, 44100, 1) \
-    XX(QCELP, TrackAudio, 12, 8000, 1) \
-    XX(CN, TrackAudio, 13, 8000, 1) \
-    XX(MPA, TrackAudio, 14, 90000, 1) \
-    XX(G728, TrackAudio, 15, 8000, 1) \
-    XX(DVI4_11025, TrackAudio, 16, 11025, 1) \
-    XX(DVI4_22050, TrackAudio, 17, 22050, 1) \
-    XX(G729, TrackAudio, 18, 8000, 1) \
-    XX(CelB, TrackVideo, 25, 90000, 1) \
-    XX(JPEG, TrackVideo, 26, 90000, 1) \
-    XX(nv, TrackVideo, 28, 90000, 1) \
-    XX(H261, TrackVideo, 31, 90000, 1) \
-    XX(MPV, TrackVideo, 32, 90000, 1) \
-    XX(MP2T, TrackVideo, 33, 90000, 1) \
-    XX(H263, TrackVideo, 34, 90000, 1) \
+    XX(PCMU, TrackAudio, 0, 8000, 1, CodecG711U) \
+    XX(GSM, TrackAudio , 3, 8000, 1, CodecInvalid) \
+    XX(G723, TrackAudio, 4, 8000, 1, CodecInvalid) \
+    XX(DVI4_8000, TrackAudio, 5, 8000, 1, CodecInvalid) \
+    XX(DVI4_16000, TrackAudio, 6, 16000, 1, CodecInvalid) \
+    XX(LPC, TrackAudio, 7, 8000, 1, CodecInvalid) \
+    XX(PCMA, TrackAudio, 8, 8000, 1, CodecG711A) \
+    XX(G722, TrackAudio, 9, 8000, 1, CodecInvalid) \
+    XX(L16_Stereo, TrackAudio, 10, 44100, 2, CodecInvalid) \
+    XX(L16_Mono, TrackAudio, 11, 44100, 1, CodecInvalid) \
+    XX(QCELP, TrackAudio, 12, 8000, 1, CodecInvalid) \
+    XX(CN, TrackAudio, 13, 8000, 1, CodecInvalid) \
+    XX(MPA, TrackAudio, 14, 90000, 1, CodecInvalid) \
+    XX(G728, TrackAudio, 15, 8000, 1, CodecInvalid) \
+    XX(DVI4_11025, TrackAudio, 16, 11025, 1, CodecInvalid) \
+    XX(DVI4_22050, TrackAudio, 17, 22050, 1, CodecInvalid) \
+    XX(G729, TrackAudio, 18, 8000, 1, CodecInvalid) \
+    XX(CelB, TrackVideo, 25, 90000, 1, CodecInvalid) \
+    XX(JPEG, TrackVideo, 26, 90000, 1, CodecInvalid) \
+    XX(nv, TrackVideo, 28, 90000, 1, CodecInvalid) \
+    XX(H261, TrackVideo, 31, 90000, 1, CodecInvalid) \
+    XX(MPV, TrackVideo, 32, 90000, 1, CodecInvalid) \
+    XX(MP2T, TrackVideo, 33, 90000, 1, CodecInvalid) \
+    XX(H263, TrackVideo, 34, 90000, 1, CodecInvalid) \
 
 typedef enum {
-#define ENUM_DEF(name, type, value, clock_rate, channel) PT_ ## name = value,
+#define ENUM_DEF(name, type, value, clock_rate, channel, codec_id) PT_ ## name = value,
     RTP_PT_MAP(ENUM_DEF)
 #undef ENUM_DEF
     PT_MAX = 128
@@ -103,6 +88,7 @@ public:
     static TrackType getTrackType(int pt);
     static int getAudioChannel(int pt);
     static const char *getName(int pt);
+    static CodecId getCodecId(int pt);
 private:
     RtpPayload() = delete;
     ~RtpPayload() = delete;
@@ -143,6 +129,7 @@ public:
     int _pt;
     string _codec;
     int _samplerate;
+    int _channel;
     string _fmtp;
     string _control;
     string _control_surffix;
@@ -258,16 +245,17 @@ public:
                 _printer << pr.first << "=" << pr.second << "\r\n";
             }
         } else {
-            _printer << "o=- 1383190487994921 1 IN IP4 0.0.0.0\r\n";
-            _printer << "s=RTSP Session, streamed by the ZLMediaKit\r\n";
-            _printer << "i=ZLMediaKit Live Stream\r\n";
+            _printer << "o=- 0 0 IN IP4 0.0.0.0\r\n";
+            _printer << "s=Streamed by " << SERVER_NAME << "\r\n";
             _printer << "c=IN IP4 0.0.0.0\r\n";
             _printer << "t=0 0\r\n";
         }
 
         if(dur_sec <= 0){
-            _printer << "a=range:npt=0-\r\n";
+            //直播
+            _printer << "a=range:npt=now-\r\n";
         }else{
+            //点播
             _printer << "a=range:npt=0-" << dur_sec  << "\r\n";
         }
         _printer << "a=control:*\r\n";

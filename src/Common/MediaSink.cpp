@@ -1,28 +1,13 @@
 ﻿/*
- * MIT License
- *
- * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
+
 #include "MediaSink.h"
 
 //最多等待未初始化的Track 10秒，超时之后会忽略未初始化的Track
@@ -49,6 +34,16 @@ void MediaSink::addTrack(const Track::Ptr &track_in) {
     track->addDelegate(std::make_shared<FrameWriterInterfaceHelper>([this](const Frame::Ptr &frame) {
         if (_allTrackReady) {
             onTrackFrame(frame);
+            return;
+        }
+
+        //还有track未准备好，如果是视频的话，如果直接丢帧可能导致丢失I帧
+        checkTrackIfReady(nullptr);
+        if (_allTrackReady) {
+            //运行至这里说明Track状态由未就绪切换为已就绪状态,那么这帧就不应该丢弃
+            onTrackFrame(frame);
+        } else if(frame->keyFrame()){
+            WarnL << "some track is unready，drop key frame of: " << frame->getCodecName();
         }
     }));
 }
@@ -68,8 +63,8 @@ void MediaSink::inputFrame(const Frame::Ptr &frame) {
     if (it == _track_map.end()) {
         return;
     }
-    it->second->inputFrame(frame);
     checkTrackIfReady(it->second);
+    it->second->inputFrame(frame);
 }
 
 void MediaSink::checkTrackIfReady_l(const Track::Ptr &track){
@@ -82,6 +77,7 @@ void MediaSink::checkTrackIfReady_l(const Track::Ptr &track){
 }
 
 void MediaSink::checkTrackIfReady(const Track::Ptr &track){
+    lock_guard<recursive_mutex> lck(_mtx);
     if (!_allTrackReady && !_trackReadyCallback.empty()) {
         if (track) {
             checkTrackIfReady_l(track);
@@ -131,13 +127,14 @@ void MediaSink::emitAllTrackReady() {
         return;
     }
 
+    DebugL << "all track ready use " << _ticker.elapsedTime() << "ms";
     if (!_trackReadyCallback.empty()) {
         //这是超时强制忽略未准备好的Track
         _trackReadyCallback.clear();
         //移除未准备好的Track
         for (auto it = _track_map.begin(); it != _track_map.end();) {
             if (!it->second->ready()) {
-                WarnL << "该track长时间未被初始化,已忽略:" << it->second->getCodecName();
+                WarnL << "track not ready for a long time, ignored: " << it->second->getCodecName();
                 it = _track_map.erase(it);
                 continue;
             }

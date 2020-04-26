@@ -1,27 +1,11 @@
 ﻿/*
- * MIT License
- *
- * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
 
 #include "ShellSession.h"
@@ -57,7 +41,7 @@ void ShellSession::onRecv(const Buffer::Ptr&buf) {
     _beatTicker.resetTime();
     _strRecvBuf.append(buf->data(), buf->size());
     if (_strRecvBuf.find("\xff\xf4\xff\0xfd\x06") != std::string::npos) {
-        send("\033[0m\r\n	Bye bye!\r\n");
+        SockSender::send("\033[0m\r\n	Bye bye!\r\n");
         shutdown(SockException(Err_other,"received Ctrl+C"));
         return;
     }
@@ -94,20 +78,20 @@ inline bool ShellSession::onCommandLine(const string& line) {
     try {
         std::shared_ptr<stringstream> ss(new stringstream);
         CMDRegister::Instance()(line,ss);
-        send(ss->str());
+        SockSender::send(ss->str());
     }catch(ExitException &ex){
         return false;
     }catch(std::exception &ex){
-        send(ex.what());
-        send("\r\n");
+        SockSender::send(ex.what());
+        SockSender::send("\r\n");
     }
     printShellPrefix();
     return true;
 }
 
 inline void ShellSession::pleaseInputUser() {
-    send("\033[0m");
-    send(StrPrinter << SERVER_NAME << " login: " << endl);
+    SockSender::send("\033[0m");
+    SockSender::send(StrPrinter << SERVER_NAME << " login: " << endl);
     _loginInterceptor = [this](const string &user_name) {
         _strUserName=user_name;
         pleaseInputPasswd();
@@ -115,24 +99,24 @@ inline void ShellSession::pleaseInputUser() {
     };
 }
 inline void ShellSession::pleaseInputPasswd() {
-    send("Password: \033[8m");
+    SockSender::send("Password: \033[8m");
     _loginInterceptor = [this](const string &passwd) {
         auto onAuth = [this](const string &errMessage){
             if(!errMessage.empty()){
                 //鉴权失败
-                send(StrPrinter
-                     <<"\033[0mAuth failed("
-                     << errMessage
-                     <<"), please try again.\r\n"
-                     <<_strUserName<<"@"<<SERVER_NAME
-                     <<"'s password: \033[8m"
-                     <<endl);
+                SockSender::send(StrPrinter
+                                 << "\033[0mAuth failed("
+                                 << errMessage
+                                 << "), please try again.\r\n"
+                                 << _strUserName << "@" << SERVER_NAME
+                                 << "'s password: \033[8m"
+                                 << endl);
                 return;
             }
-            send("\033[0m");
-            send("-----------------------------------------\r\n");
-            send(StrPrinter<<"欢迎来到"<<SERVER_NAME<<", 你可输入\"help\"查看帮助.\r\n"<<endl);
-            send("-----------------------------------------\r\n");
+            SockSender::send("\033[0m");
+            SockSender::send("-----------------------------------------\r\n");
+            SockSender::send(StrPrinter<<"欢迎来到"<<SERVER_NAME<<", 你可输入\"help\"查看帮助.\r\n"<<endl);
+            SockSender::send("-----------------------------------------\r\n");
             printShellPrefix();
             _loginInterceptor=nullptr;
         };
@@ -152,7 +136,7 @@ inline void ShellSession::pleaseInputPasswd() {
             });
         };
 
-        auto flag = NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastShellLogin,_strUserName,passwd,invoker,*this);
+        auto flag = NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastShellLogin,_strUserName,passwd,invoker,static_cast<SockInfo &>(*this));
         if(!flag){
             //如果无人监听shell登录事件，那么默认shell无法登录
             onAuth("please listen kBroadcastShellLogin event");
@@ -162,7 +146,7 @@ inline void ShellSession::pleaseInputPasswd() {
 }
 
 inline void ShellSession::printShellPrefix() {
-    send(StrPrinter << _strUserName << "@" << SERVER_NAME << "# " << endl);
+    SockSender::send(StrPrinter << _strUserName << "@" << SERVER_NAME << "# " << endl);
 }
 
 }/* namespace mediakit */
